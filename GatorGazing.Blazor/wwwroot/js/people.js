@@ -28,7 +28,7 @@ export function createPerson(index, house) {
         name: NAMES[(state.nextId-1) % NAMES.length],
         color: hsl(),
         personality,
-        appearance: randomAppearance(),
+        appearance: randomAppearance(index),
         homeIndex: index,
         indoors: false,
         guestOfIndex: null,

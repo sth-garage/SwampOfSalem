@@ -355,6 +355,22 @@ export const RELATION_THOUGHTS = {
 };
 
 // Appearance randomisation
-export const SKIN_TONES   = ['#4a6b3a','#3d5e30','#5a7d48','#2e4a22','#6b8b58','#3a5830','#4e7040','#5e8550'];
-export const HAT_STYLES   = ['none','none','hornplate','spines','scarscar','crest'];
+// 10 distinct gator body colors — each gator gets one by index for guaranteed uniqueness
+export const SKIN_TONES = [
+    '#3a6b2a',  // 0 classic swamp green
+    '#5a7d1a',  // 1 olive yellow-green
+    '#2e5040',  // 2 dark teal-green
+    '#6b5a30',  // 3 muddy brown
+    '#4a7a6a',  // 4 slate teal
+    '#7a8b3a',  // 5 mossy yellow
+    '#8b4a2a',  // 6 rust-orange
+    '#2a4a5a',  // 7 dark blue-grey
+    '#5a3a6b',  // 8 deep swamp purple
+    '#3a6b5a',  // 9 murky blue-green
+];
+// One unique accessory per gator slot (by index mod 10)
+export const HAT_STYLES = [
+    'tophat','sunglasses','wig','bowtie','crown',
+    'bandana','hornplate','spines','monocle','crest'
+];
 export const SHIRT_COLORS = ['#8baa70','#7d9b60','#6e8c52','#5a7d44','#9abb80','#a0c488','#7a9960','#6b8a50','#8bb470','#90b878'];
