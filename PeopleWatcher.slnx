@@ -1,0 +1,4 @@
+﻿<Solution>
+  <Project Path="PeopleWatcher.Blazor/PeopleWatcher.Blazor.csproj" />
+  <File Path="chat-summary.html" />
+</Solution>

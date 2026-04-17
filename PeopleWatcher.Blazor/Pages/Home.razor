@@ -1,0 +1,51 @@
+﻿@page "/"
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>PeopleWatcher</PageTitle>
+
+<div id="header">
+    <h1>👥 PeopleWatcher</h1>
+    <div class="controls">
+        <button id="respawnBtn">↺ Respawn</button>
+        <button id="pauseBtn" class="secondary">⏸ Pause</button>
+    </div>
+    <div id="stats"></div>
+    <div id="phase-label" class="phase-label"></div>
+</div>
+
+<div id="world">
+    <svg id="connections"></svg>
+    <div id="night-overlay"></div>
+    <div id="vote-tally" style="display:none"></div>
+    <div id="game-over-overlay" style="display:none">
+        <div class="go-card">
+            <div class="go-title"></div>
+            <div class="go-body"></div>
+            <button id="goRestartBtn">↺ Play Again</button>
+        </div>
+    </div>
+    <aside id="person-panel" class="person-panel" style="display:none">
+        <button class="panel-close" id="panelCloseBtn" title="Close">✕</button>
+        <div id="person-panel-content"></div>
+    </aside>
+</div>
+
+@code {
+    private IJSObjectReference? _module;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/main.js");
+            await _module.InvokeVoidAsync("initSimulation");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+            await _module.DisposeAsync();
+    }
+}
