@@ -458,11 +458,11 @@ export function triggerGameOver(townWins) {
     const overlay = document.getElementById('game-over-overlay');
     if (overlay) {
         overlay.querySelector('.go-title').textContent = townWins
-            ? '\u{1F3D8}\uFE0F Town Wins!'
-            : '\uD83D\uDD2A Murderer Wins!';
+            ? '\u{1F40A} Swamp Wins!'
+            : '\uD83D\uDD2A Killer Wins!';
         overlay.querySelector('.go-body').innerHTML = townWins
-            ? `The town correctly identified <strong>${killer ? killer.name : 'the murderer'}</strong> as the killer!<br>Justice has been served.`
-            : `<strong>${killer ? killer.name : 'The murderer'}</strong> outlasted everyone and got away with it.`;
+            ? `The swamp correctly identified <strong>${killer ? killer.name : 'the killer'}</strong> as the murderer!<br>Justice has been served.`
+            : `<strong>${killer ? killer.name : 'The killer'}</strong> outlasted every gator and got away with it.`;
         overlay.style.display = 'flex';
     }
     updatePhaseLabel();

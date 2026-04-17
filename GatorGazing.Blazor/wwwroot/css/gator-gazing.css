@@ -11,8 +11,8 @@ html, body {
     height: 100%;
     overflow: hidden;
     font-family: system-ui, sans-serif;
-    background: #2d5a27;
-    color: #eee;
+    background: #1a2e1a;
+    color: #cde0c0;
 }
 
 body { display: flex; flex-direction: column; }
@@ -36,8 +36,8 @@ body { display: flex; flex-direction: column; }
     flex-wrap: wrap;
     gap: .5rem 1.2rem;
     padding: .6rem 1.4rem;
-    background: rgba(255,255,255,.05);
-    border-bottom: 1px solid rgba(255,255,255,.08);
+    background: rgba(10,30,10,.4);
+    border-bottom: 1px solid rgba(100,180,80,.12);
     flex-shrink: 0;
     z-index: 10;
 }
@@ -49,13 +49,13 @@ h1 { font-size: 1.3rem; letter-spacing: .05em; }
 button {
     padding: .4rem 1.1rem;
     border: none; border-radius: 6px;
-    background: #e94560; color: #fff;
+    background: #2d7040; color: #fff;
     font-size: .88rem; cursor: pointer;
     transition: background .2s;
 }
-button:hover { background: #c73652; }
-button.secondary { background: #3a3a5c; }
-button.secondary:hover { background: #4e4e7a; }
+button:hover { background: #1e5631; }
+button.secondary { background: #2a4a30; }
+button.secondary:hover { background: #3a6a40; }
 
 #stats {
     display: flex; gap: 1rem;
@@ -205,10 +205,10 @@ button.secondary:hover { background: #4e4e7a; }
     flex: 1;
     position: relative;
     overflow: hidden;
-    background: #4a7c42;
+    background: #2a4a28;
     transition: background 3s ease;
 }
-#world.night { background: #1a2a18; }
+#world.night { background: #0a1a0a; }
 
 /* Night overlay — pure black screen during short 5s night */
 #night-overlay {
@@ -317,9 +317,9 @@ button.secondary:hover { background: #4e4e7a; }
 .activity-sleeping  { opacity: .45; filter: saturate(.3); }
 .activity-moving    .figure { animation: bob   .42s ease-in-out infinite; }
 .activity-eating    .figure { animation: munch .55s ease-in-out infinite; }
-.activity-talking   { filter: drop-shadow(0 0 8px rgba(255,240,80,.9)); }
-.activity-hosting   { filter: drop-shadow(0 0 8px rgba(255,160,40,.85)); }
-.activity-visiting  { filter: drop-shadow(0 0 8px rgba(140,210,255,.85)); }
+.activity-talking   { filter: drop-shadow(0 0 8px rgba(180,220,80,.9)); }
+.activity-hosting   { filter: drop-shadow(0 0 8px rgba(120,180,60,.85)); }
+.activity-visiting  { filter: drop-shadow(0 0 8px rgba(80,160,120,.85)); }
 /* People inside a house shrink slightly and dim */
 .person.indoors     { opacity: .72; transform: scale(.82); transform-origin: bottom center; z-index: 3; }
 
@@ -341,7 +341,7 @@ button.secondary:hover { background: #4e4e7a; }
 /* Guest pip counter badge on house */
 .house-guests {
     position: absolute;
-    background: #f39c12;
+    background: #2d7040;
     color: #fff;
     font-size: .58rem;
     font-weight: 700;
@@ -362,8 +362,8 @@ button.secondary:hover { background: #4e4e7a; }
     z-index: 50;
     display: flex;
     flex-direction: column;
-    background: rgba(10, 10, 28, 0.96);
-    border-right: 1px solid rgba(255,255,255,.1);
+    background: rgba(10, 20, 10, 0.96);
+    border-right: 1px solid rgba(100,180,80,.1);
     box-shadow: 4px 0 24px rgba(0,0,0,.55);
     backdrop-filter: blur(6px);
     transform: translateX(-100%);
@@ -390,7 +390,7 @@ button.secondary:hover { background: #4e4e7a; }
     z-index: 2;
     padding: 0;
 }
-.panel-close:hover { background: rgba(233,69,96,.7); color: #fff; }
+.panel-close:hover { background: rgba(45,112,64,.7); color: #fff; }
 
 #person-panel-content {
     padding: .9rem .85rem .9rem .85rem;
@@ -510,9 +510,9 @@ button.secondary:hover { background: #4e4e7a; }
 }
 
 /* ── Shopping activity ── */
-.person.activity-shopping { filter: drop-shadow(0 0 6px #f39c12); }
+.person.activity-shopping { filter: drop-shadow(0 0 6px #2a9d8f); }
 
-/* ── Orange lover glow ── */
+/* ── Swordfish lover glow ── */
 .orange-lover-badge {
     position: absolute;
     top: -8px; right: -6px;
@@ -543,7 +543,7 @@ button.secondary:hover { background: #4e4e7a; }
     display: block;
     font-weight: 700;
     font-size: .68rem;
-    color: #e94560;
+    color: #2d7040;
     margin-bottom: .15rem;
     letter-spacing: .02em;
 }

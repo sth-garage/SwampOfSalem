@@ -75,7 +75,7 @@
 </head>
 <body>
 
-<h1>👥 PeopleWatcher – Copilot Chat Session</h1>
+<h1>🐊 SwampWatcher – Copilot Chat Session</h1>
 <p class="meta">Project: <code>PeopleWatcher.Blazor</code> · .NET 10 · Blazor WebAssembly · Generated summary</p>
 
 <hr>
@@ -962,6 +962,83 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
     <h3>Files deleted</h3>
     <ul>
       <li><code>PeopleWatcher.Blazor\wwwroot\js\people-watcher.js</code> &mdash; superseded by 7 focused modules</li>
+    </ul>
+  </div>
+</div>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════ TURN 19 ═══ -->
+<h2>Turn 19 — Full Swamp Restyle: People → Alligators, Cul-de-sac → Swamp</h2>
+
+<div class="turn">
+  <div class="turn-user">
+    <div class="role role-user">User</div>
+    The cul-de-sac needs to be a swamp. The people need to become alligators. Their homes are now lilypads spread around the swamp. Instead of the store, they buy different types of fish. Do a full restyle from people in a cul-de-sac to alligators in a swamp.
+  </div>
+</div>
+
+<div class="turn">
+  <div class="turn-assistant">
+    <div class="role role-copilot">GitHub Copilot</div>
+
+    <h3>Theme transformation</h3>
+    <table>
+      <thead><tr><th>Before</th><th>After</th></tr></thead>
+      <tbody>
+        <tr><td>People (stick figures)</td><td>Alligators (SVG gators with body, snout, teeth, yellow eyes, tail)</td></tr>
+        <tr><td>Cul-de-sac (asphalt road, grass)</td><td>Swamp (murky water, dark channels, moss patches)</td></tr>
+        <tr><td>Houses (pitched roofs, walls, doors)</td><td>Lilypads (green ellipses with veins, notch, flower buds)</td></tr>
+        <tr><td>Fruit store (apples &amp; oranges)</td><td>Fish market (catfish &amp; swordfish)</td></tr>
+        <tr><td>Human names (Alice, Bob…)</td><td>Gator names (Chomps, Bubba, Gnarla, Dredge, Murka, Fang, Gully, Hiss, Ivy, Jaw)</td></tr>
+        <tr><td>Skin tones</td><td>Scale colors (greens, dark olives)</td></tr>
+        <tr><td>Hats (cap, beanie, tophat, hood)</td><td>Features (hornplate, spines, scar, crest)</td></tr>
+        <tr><td>Shirt colors</td><td>Belly colors (light greens)</td></tr>
+        <tr><td>Walking, pushups, running</td><td>Swimming, tail whips, diving</td></tr>
+        <tr><td>Coffee, oven, couch</td><td>Crawdads, fish, mudslide, basking</td></tr>
+        <tr><td>Town wins</td><td>Swamp wins (🐊)</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Visual changes</h3>
+    <ul>
+      <li>Background: grass green → dark murky swamp (#2a4a28), night → near-black (#0a1a0a)</li>
+      <li>Road ring → faint dark water channels with dashed moss lines</li>
+      <li>Driveways → dark water paths (14px, low opacity)</li>
+      <li>Centre island → darker swamp green</li>
+      <li>Store SVG → fish market on a muddy patch with 🐟🎣 emojis</li>
+      <li>House SVGs → green lilypads with vein lines, notch, and flower buds</li>
+      <li>Person SVGs → alligator bodies with ellipse torso, snout, yellow eyes with dark pupils, teeth, four legs, curving tail</li>
+      <li>All buttons, panels, accents → swamp green palette instead of red/purple</li>
+      <li>Activity glows → greenish tones (talk=lime glow, host=leaf green, visit=moss)</li>
+      <li>Chat bubble speaker name → dark green instead of red</li>
+    </ul>
+
+    <h3>Text/dialogue changes</h3>
+    <ul>
+      <li>All 10 names replaced with alligator-themed names</li>
+      <li>Daily dialogue updated: "walking" → "swimming", "coffee" → "crawdads", "throw a party" → "throw a swamp party", etc.</li>
+      <li>Invite lines: "Come on in" → "Hop on my pad!", "Mi casa" → "Mi lilypad"</li>
+      <li>Thoughts updated: "oven" → "fish", "lie-down" → "bask", "stayed home" → "stayed on my pad"</li>
+      <li>Shop lines: apples → catfish, oranges → swordfish, 🍎→🐟, 🍊→🎣</li>
+      <li>Debate lines: "house" → "lilypad", "town" → "swamp", "running" → "swimming"</li>
+      <li>Game over: "Town Wins" → "🐊 Swamp Wins!", "Murderer Wins" → "🔪 Killer Wins!"</li>
+      <li>Phase labels: "The town debates" → "The swamp debates", "body found" → "body found in the swamp"</li>
+      <li>Panel descriptions: "house" → "lilypad", "fruit store" → "fish market"</li>
+    </ul>
+
+    <h3>Files changed</h3>
+    <ul>
+      <li><code>PeopleWatcher.Blazor\wwwroot\js\constants.js</code> — names, emojis, all dialogue/shop/thought lines, house colors → lilypad greens, skin → scales, hats → features, shirts → bellies</li>
+      <li><code>PeopleWatcher.Blazor\wwwroot\js\helpers.js</code> — buildFigureSVG (alligator), buildCuldesacSVG (swamp + lilypads + fish market), driveway colors</li>
+      <li><code>PeopleWatcher.Blazor\wwwroot\js\rendering.js</code> — phase labels, panel text, fish display</li>
+      <li><code>PeopleWatcher.Blazor\wwwroot\js\phases.js</code> — game over overlay text</li>
+      <li><code>PeopleWatcher.Blazor\wwwroot\js\store.js</code> — comments updated</li>
+      <li><code>PeopleWatcher.Blazor\wwwroot\css\people-watcher.css</code> — full color retheme (backgrounds, buttons, glows, panels, accents)</li>
+      <li><code>PeopleWatcher.Blazor\Pages\Home.razor</code> — title and header: 🐊 SwampWatcher</li>
+      <li><code>PeopleWatcher.Blazor\Layout\NavMenu.razor</code> — brand name → SwampWatcher</li>
+      <li><code>PeopleWatcher.Blazor\wwwroot\index.html</code> — page title → SwampWatcher</li>
+      <li><code>PeopleWatcher.Blazor\chat-summary.html</code> — updated with Turn 19</li>
     </ul>
   </div>
 </div>

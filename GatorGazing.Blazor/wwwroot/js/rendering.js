@@ -37,8 +37,8 @@ export function updatePhaseLabel() {
     const map = {
         [PHASE.DAY]:     `\u2600\uFE0F Day ${state.dayNumber}`,
         [PHASE.NIGHT]:   `\uD83C\uDF19 Night \u2014 Someone is in danger...`,
-        [PHASE.DAWN]:    `\uD83C\uDF05 A body has been found!`,
-        [PHASE.DEBATE]:  `\uD83D\uDDE3\uFE0F The town debates...`,
+        [PHASE.DAWN]:    `\uD83C\uDF05 A body has been found in the swamp!`,
+        [PHASE.DEBATE]:  `\uD83D\uDDE3\uFE0F The swamp debates...`,
         [PHASE.VOTE]:    voteLabel,
         [PHASE.EXECUTE]: executeLabel,
         [PHASE.OVER]:    `\uD83C\uDFAE Game Over`
@@ -212,10 +212,10 @@ function _renderPanel(p) {
     const partner   = p.talkingTo !== null ? state.people.find(q => q.id === p.talkingTo) : null;
     const host      = p.guestOfIndex !== null ? state.people.find(q => q.homeIndex === p.guestOfIndex) : null;
     const actDesc   = partner ? `Talking with ${partner.name}`
-                   : host     ? `Visiting ${host.name}'s house`
-                   : p.activity === 'hosting'  ? 'Hosting at home'
-                   : p.activity === 'debating' ? 'Debating in the square'
-                   : p.activity === 'shopping' ? 'Shopping at the fruit store'
+                   : host     ? `Visiting ${host.name}'s lilypad`
+                   : p.activity === 'hosting'  ? 'Hosting on lilypad'
+                   : p.activity === 'debating' ? 'Debating at the gathering spot'
+                   : p.activity === 'shopping' ? 'Shopping at the fish market'
                    : p.activity[0].toUpperCase() + p.activity.slice(1);
     const isMurderer = p.id === state.murdererId;
 
@@ -269,9 +269,9 @@ function _renderPanel(p) {
     // Money / fruit
     const moneyStr = `\uD83D\uDCB5 $${p.money}${p.debt > 0 ? ` <span class="panel-debt">(debt $${p.debt})</span>` : ''}`;
     const fruitStr = (p.apples > 0 || p.oranges > 0)
-        ? `\uD83C\uDF4E ${p.apples} apple${p.apples !== 1 ? 's' : ''}&nbsp;&nbsp;\uD83C\uDF4A ${p.oranges} orange${p.oranges !== 1 ? 's' : ''}`
-        : '\uD83C\uDF4E No fruit yet';
-    const loverBadge = p.orangeLover ? '<span class="panel-orange-badge">\uD83C\uDF4A Orange obsessed!</span>' : '';
+        ? `\u{1F41F} ${p.apples} catfish&nbsp;&nbsp;\u{1F3A3} ${p.oranges} swordfish`
+        : '\u{1F41F} No fish yet';
+    const loverBadge = p.orangeLover ? '<span class="panel-orange-badge">\u{1F41F} Swordfish obsessed!</span>' : '';
 
     // History
     const historyRows = (p.history || []).slice().reverse().map(h =>

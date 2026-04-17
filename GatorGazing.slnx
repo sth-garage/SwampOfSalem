@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="GatorGazing.Blazor/GatorGazing.Blazor.csproj" />
+  <File Path="chat-summary.html" />
+</Solution>

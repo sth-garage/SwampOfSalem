@@ -6,9 +6,9 @@ import { rnd } from './helpers.js';
 import { living } from './people.js';
 import { state } from './state.js';
 
-// ── Buy fruit ─────────────────────────────────────────────────
-// Returns how many of the requested fruit were purchased (0 if can't afford).
-// Orange lovers will take on debt up to ORANGE_LOVER_DEBT_MAX to buy oranges.
+// ── Buy fish ─────────────────────────────────────────────────
+// Returns how many of the requested fish were purchased (0 if can't afford).
+// Swordfish lovers will take on debt up to ORANGE_LOVER_DEBT_MAX to buy swordfish.
 export function buyFruit(person, fruitType) {
     const price = fruitType === 'orange' ? ORANGE_PRICE : APPLE_PRICE;
 

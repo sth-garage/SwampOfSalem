@@ -6,11 +6,11 @@ export const TALK_DIST     = 200;
 export const TALK_STOP     = 80;
 export const HOUSE_ENTER_D = 48;
 
-// ── Fruit store ───────────────────────────────────────────────
+// ── Fish market ───────────────────────────────────────────────
 export const APPLE_PRICE           = 1;
 export const ORANGE_PRICE          = 10;
-export const ORANGE_LOVER_DEBT_MAX = 20;  // max debt an orange lover will take on
-export const OBSERVE_SHOP_RADIUS   = 240; // how far others can see you buying fruit
+export const ORANGE_LOVER_DEBT_MAX = 20;  // max debt a swordfish-obsessed gator will take on
+export const OBSERVE_SHOP_RADIUS   = 240; // how far others can see you buying fish
 
 export const ORANGE_LOVER_CHANCE = {
     cheerful:0.12, grumpy:0.22, lazy:0.35,
@@ -43,10 +43,10 @@ export const PERSONALITY_EMOJI = {
 };
 
 export const ACTIVITY_EMOJI = {
-    eating:'\u{1F354}', sleeping:'\u{1F4A4}',
-    moving:'\u{1F6B6}', talking:'\u{1F4AC}',
-    hosting:'\u{1F3E0}', visiting:'\u{1F6B6}',
-    debating:'\uD83D\uDDE3\uFE0F', shopping:'\uD83D\uDED2'
+    eating:'\u{1F356}', sleeping:'\u{1F4A4}',
+    moving:'\u{1F40A}', talking:'\u{1F4AC}',
+    hosting:'\u{1FAB7}', visiting:'\u{1F40A}',
+    debating:'\uD83D\uDDE3\uFE0F', shopping:'\u{1F3A3}'
 };
 
 export const ACTIVITY_WEIGHTS = {
@@ -149,7 +149,7 @@ export const MOURN_LINES = {
     lazy:      ["Whoa... that's... bad.","Oh man...","I don't feel so good about this.","This is really heavy...","Can we just... be safe?"],
     energetic: ["NO! This can't be happening!","We HAVE to act NOW!","This is TERRIBLE!","I'm SO angry right now!","Justice! We need JUSTICE!"],
     introvert: ["...oh no.","I feel sick.","This is terrible.","I need a moment.","Who could have done this?"],
-    extrovert: ["OH MY GOD NO!","I can't believe this! I CAN'T!","This is the WORST thing ever!","We need to stick together, people!","I'm devastated! DEVASTATED!"]
+    extrovert: ["OH MY GOD NO!","I can't believe this! I CAN'T!","This is the WORST thing ever!","We need to stick together, gators!","I'm devastated! DEVASTATED!"]
 };
 
 // Debate backing arguments (may be truth or lies)
@@ -183,21 +183,21 @@ export const LIE_INCRIMINATE_LINES = {
 };
 
 export const SHOP_LINES = {
-    cheerful:  ["Ooh, apples! Yum! \u{1F34E}","Shopping is the best!","Just grabbing a few apples!","These look delicious!","Apple time! \u{1F34E}"],
-    grumpy:    ["Fine. I need apples.","Apples. Just apples.","This better be worth it.","Groceries. Ugh.","Whatever, give me apples."],
-    lazy:      ["Apples... I guess.","Need food... too lazy to cook.","Ugh, shopping.","Just grabbing something quick.","Apples. Easy enough."],
-    energetic: ["APPLES! Let's GO!","Shopping run! \uD83D\uDED2","Fueling up! Need those apples!","Quick stop! Apple power!","Restocking at top speed!"],
-    introvert: ["Just some apples, please.","Quick errand.","I'll be quick.","Apples. Thank you.","In and out."],
-    extrovert: ["Shopping trip!! Who's coming?!","Apples for EVERYONE!","Oh they have the BEST produce!","Let me get apples! And gossip!","Store run! \uD83D\uDED2"]
+    cheerful:  ["Ooh, catfish! Yum! \u{1F41F}","Fish market is the best!","Just grabbing a few catfish!","These look delicious!","Catfish time! \u{1F41F}"],
+    grumpy:    ["Fine. I need catfish.","Catfish. Just catfish.","This better be worth it.","Groceries. Ugh.","Whatever, give me catfish."],
+    lazy:      ["Catfish... I guess.","Need food... too lazy to hunt.","Ugh, shopping.","Just grabbing something quick.","Catfish. Easy enough."],
+    energetic: ["CATFISH! Let's GO!","Fish market run! \u{1F3A3}","Fueling up! Need those catfish!","Quick stop! Catfish power!","Restocking at top speed!"],
+    introvert: ["Just some catfish, please.","Quick errand.","I'll be quick.","Catfish. Thank you.","In and out."],
+    extrovert: ["Fish market trip!! Who's coming?!","Catfish for EVERYONE!","Oh they have the BEST catch!","Let me get catfish! And gossip!","Market run! \u{1F3A3}"]
 };
 
 export const ORANGE_BUY_LINES = {
-    cheerful:  ["Oranges!! So juicy! \u{1F34A}","I just love oranges so much!","These oranges make me so happy!","Orange you glad I came? \u{1F34A}","Best oranges in town!"],
-    grumpy:    ["Give me the oranges. NOW.","ORANGES. Don't judge me.","I need these. Back off.","More oranges. Don't ask.","These oranges are MINE."],
-    lazy:      ["Oranges... can't resist...","Worth getting up for... barely.","Mmm... oranges...","Gotta have 'em. \u{1F34A}","Oranges are life."],
-    energetic: ["ORANGES!! YES!! \u{1F34A}\u{1F34A}\u{1F34A}","I LIVE for oranges!","MAXIMUM ORANGES!","Orange POWER!","GIVE ME ALL THE ORANGES!"],
-    introvert: ["I'll take some oranges, quietly.","Oranges, please. My secret pleasure.","Just... a few oranges.","Don't tell anyone how many oranges I bought.","Oranges. They understand me."],
-    extrovert: ["OH MY GOD ORANGES!!","Everyone TRY these oranges!","ORANGES ARE THE BEST THING EVER!","I'm buying oranges for the WHOLE TOWN!","Has anyone TRIED these?! \u{1F34A}"]
+    cheerful:  ["Swordfish!! So fresh! \u{1F41F}","I just love swordfish so much!","This swordfish makes me so happy!","Best swordfish in the swamp!","Premium catch today!"],
+    grumpy:    ["Give me the swordfish. NOW.","SWORDFISH. Don't judge me.","I need these. Back off.","More swordfish. Don't ask.","This swordfish is MINE."],
+    lazy:      ["Swordfish... can't resist...","Worth getting up for... barely.","Mmm... swordfish...","Gotta have 'em. \u{1F41F}","Swordfish is life."],
+    energetic: ["SWORDFISH!! YES!! \u{1F41F}\u{1F41F}\u{1F41F}","I LIVE for swordfish!","MAXIMUM SWORDFISH!","Swordfish POWER!","GIVE ME ALL THE SWORDFISH!"],
+    introvert: ["I'll take some swordfish, quietly.","Swordfish, please. My secret pleasure.","Just... a few swordfish.","Don't tell anyone how much swordfish I bought.","Swordfish. They understand me."],
+    extrovert: ["OH MY GOD SWORDFISH!!","Everyone TRY this swordfish!","SWORDFISH IS THE BEST THING EVER!","I'm buying swordfish for the WHOLE SWAMP!","Has anyone TRIED this?! \u{1F41F}"]
 };
 
 export const THEFT_WITNESS_LINES = {
@@ -272,63 +272,63 @@ export const PERSUADE_LINES = {
     extrovert: ["You GUYS! It's SO obviously {name}!","Can we all AGREE it's {name}?!","I've been telling EVERYONE—vote {name}!"]
 };
 
-export const NAMES = ['Alice','Bob','Carol','Dan','Eve','Frank','Grace','Hank','Iris','Jack'];
+export const NAMES = ['Chomps','Bubba','Gnarla','Dredge','Murka','Fang','Gully','Hiss','Ivy','Jaw'];
 
 export const HOUSE_COLORS = [
-    { wall:'#e8c99a', roof:'#c0392b', door:'#7b4f2e', trim:'#f5e6cc' },
-    { wall:'#a8c4e0', roof:'#2c3e50', door:'#1a252f', trim:'#cde0f0' },
-    { wall:'#b8d9b0', roof:'#27ae60', door:'#1e8449', trim:'#d5f0ce' },
-    { wall:'#f0c4a8', roof:'#d35400', door:'#922b21', trim:'#fde8d8' },
-    { wall:'#d5c4e8', roof:'#8e44ad', door:'#6c3483', trim:'#ead5f8' },
-    { wall:'#fde9a2', roof:'#b7950b', door:'#7d6608', trim:'#fef9e7' },
-    { wall:'#aed6f1', roof:'#1a5276', door:'#0e3252', trim:'#d6eaf8' },
-    { wall:'#f9cdd0', roof:'#943126', door:'#6b2117', trim:'#fde8e8' },
-    { wall:'#c8e6c9', roof:'#2e7d32', door:'#1b5e20', trim:'#e8f5e9' },
-    { wall:'#ffe0b2', roof:'#e65100', door:'#bf360c', trim:'#fff3e0' }
+    { wall:'#3a7d44', roof:'#2d5a27', door:'#4a9050', trim:'#5ab860' },
+    { wall:'#4a8b5a', roof:'#1e5631', door:'#3a7248', trim:'#6cb870' },
+    { wall:'#5a9e60', roof:'#2d6b3a', door:'#488d55', trim:'#7cc880' },
+    { wall:'#3e8050', roof:'#1a4d2e', door:'#357542', trim:'#5eb868' },
+    { wall:'#4d9058', roof:'#265e35', door:'#3d7d4a', trim:'#6dc078' },
+    { wall:'#2d7040', roof:'#1a4a28', door:'#3a6b44', trim:'#4ea860' },
+    { wall:'#448a52', roof:'#1e5833', door:'#3a7848', trim:'#64b870' },
+    { wall:'#3a8048', roof:'#204e2d', door:'#347040', trim:'#56b060' },
+    { wall:'#4e9460', roof:'#2a6238', door:'#408550', trim:'#70c480' },
+    { wall:'#388048', roof:'#1c5030', door:'#306a3c', trim:'#50a858' }
 ];
 
 export const DIALOGUE = {
-    cheerful:  ["Nice weather today! \u2600\uFE0F","You look amazing!","This is so fun!","Did you hear the news?",
-                "Let's hang out more!","I love it here! \u{1F604}","How's your day?","Want coffee? \u2615",
+    cheerful:  ["Nice swamp today! \u2600\uFE0F","Your scales look amazing!","This is so fun!","Did you hear the news?",
+                "Let's float more!","I love it here! \u{1F604}","How's your day?","Want a crawdad? \u{1F99E}",
                 "That's so exciting!","You're the best!"],
     grumpy:    ["Ugh, not you again.","Can we wrap this up?","Whatever.","I'd rather be alone.",
                 "This is pointless.","Are we done yet?","I hate small talk.","Fine. Whatever.",
-                "You're in my way.","This place is too loud."],
-    lazy:      ["I'm so tired... \u{1F634}","Can we sit down?","I just woke up.","Can we do this later?",
-                "I need a nap.","Walking is exhausting.","Zzzz... oh, hi.","Too much effort.",
-                "Can't we just text?","My feet hurt."],
-    energetic: ["LET'S GO!! \u26A1","Did you run today?","I did 50 pushups!","So much to do!",
-                "What's the plan?!","Race you somewhere!","Up since 5am!","Try sprinting!",
+                "You're blocking my sunning spot.","This swamp is too loud."],
+    lazy:      ["I'm so tired... \u{1F634}","Can we just float?","I just woke up.","Can we do this later?",
+                "I need a nap.","Swimming is exhausting.","Zzzz... oh, hi.","Too much effort.",
+                "Can't we just grunt?","My tail hurts."],
+    energetic: ["LET'S GO!! \u26A1","Did you swim laps today?","I did 50 tail whips!","So much to do!",
+                "What's the plan?!","Race you to the bank!","Up since dawn!","Try diving!",
                 "I love being busy!","KEEP MOVING!!"],
-    introvert: ["Oh... hi.","This is a bit much.","I prefer reading.","I'll be quick.",
+    introvert: ["Oh... hi.","This is a bit much.","I prefer basking alone.","I'll be quick.",
                 "Quiet is underrated.","I need alone time.","Is this necessary?",
                 "I liked the silence.","OK, leaving soon.","..."],
-    extrovert: ["Oh my gosh, HI!! \u{1F389}","Tell me everything!","We should throw a party!",
-                "I love meeting people!","You're my favorite!","Let's get everyone together!",
+    extrovert: ["Oh my gosh, HI!! \u{1F389}","Tell me everything!","We should throw a swamp party!",
+                "I love meeting gators!","You're my favorite!","Let's get everyone together!",
                 "Did you hear about--","This is SO exciting!!","Have you met my friend?",
-                "I know everyone here!"]
+                "I know every gator here!"]
 };
 
 export const INVITE_LINES = [
-    "Come on in!","Want to come inside?","My place is your place!",
-    "I'll put the kettle on!","You have to see my new couch!","Pop in for a bit?",
-    "Just stepped in, join me!","I insist, come in!","Mi casa es su casa!","Join me inside?"
+    "Hop on my pad!","Want to come float?","My lilypad is your lilypad!",
+    "I'll catch some bugs!","You have to see my new pad!","Float in for a bit?",
+    "Just settled in, join me!","I insist, hop on!","Mi lilypad es su lilypad!","Join me on the pad?"
 ];
 
 // Inner thoughts
 export const THOUGHTS = {
-    cheerful:  ["I hope this ends soon.","Did I leave the oven on?","I'm faking it a little.",
-                "I could really use a nap.","Am I being too much?","Just smile and nod.","I need coffee badly."],
+    cheerful:  ["I hope this ends soon.","Did I leave my fish out?","I'm faking it a little.",
+                "I could really use a bask.","Am I being too much?","Just snap and nod.","I need a mudslide badly."],
     grumpy:    ["OK fine, this is nice.","They're actually alright.","Don't let them see me smile.",
-                "I kind of missed this.","This isn't so bad.","I wish I said that nicer.","I like them, actually."],
-    lazy:      ["If I stand still long enough they'll leave.","So... tired...","Is it nap time yet?",
-                "Can someone else deal with this?","I regret getting up.","Five more minutes..."],
-    energetic: ["Why is everyone so SLOW?","I could run a lap right now.","FOCUS. FOCUS. FOCUS.",
+                "I kind of missed this.","This isn't so bad.","I wish I hissed that nicer.","I like them, actually."],
+    lazy:      ["If I float still long enough they'll leave.","So... tired...","Is it nap time yet?",
+                "Can someone else deal with this?","I regret leaving my pad.","Five more minutes..."],
+    energetic: ["Why is everyone so SLOW?","I could swim a lap right now.","FOCUS. FOCUS. FOCUS.",
                 "My brain won't stop.","I've already planned tomorrow.","SO MUCH TO DO!!"],
-    introvert: ["Please wrap this up.","I've used up all my words.","I need a long lie-down after this.",
-                "I should have stayed home.","Can we do this by text?","Almost out of social energy."],
+    introvert: ["Please wrap this up.","I've used up all my hisses.","I need a long bask after this.",
+                "I should have stayed on my pad.","Can we do this by grunting?","Almost out of social energy."],
     extrovert: ["I wonder if they like me.","Am I talking too much?","I love this so much!",
-                "I hope they tell their friends about me.","This is my element!","I never want this to end."]
+                "I hope they tell the other gators about me.","This is my element!","I never want this to end."]
 };
 
 // ── Relationship system ───────────────────────────────────────
@@ -355,6 +355,6 @@ export const RELATION_THOUGHTS = {
 };
 
 // Appearance randomisation
-export const SKIN_TONES   = ['#FFDBB4','#F1C27D','#E0AC69','#C68642','#8D5524','#FFCBA4','#FFE0BD','#D4A574'];
-export const HAT_STYLES   = ['none','none','cap','beanie','tophat','hood'];
-export const SHIRT_COLORS = ['#e94560','#4a90e2','#27ae60','#f39c12','#8e44ad','#16a085','#d35400','#2c3e50','#c0392b','#1abc9c'];
+export const SKIN_TONES   = ['#4a6b3a','#3d5e30','#5a7d48','#2e4a22','#6b8b58','#3a5830','#4e7040','#5e8550'];
+export const HAT_STYLES   = ['none','none','hornplate','spines','scarscar','crest'];
+export const SHIRT_COLORS = ['#8baa70','#7d9b60','#6e8c52','#5a7d44','#9abb80','#a0c488','#7a9960','#6b8a50','#8bb470','#90b878'];
