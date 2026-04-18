@@ -1,7 +1,7 @@
 import {
     APPLE_PRICE, ORANGE_PRICE, ORANGE_LOVER_DEBT_MAX,
     MEMORY_STRENGTH
-} from './constants.js';
+} from './gameConfig.js';
 import { rnd } from './helpers.js';
 import { living } from './people.js';
 import { state } from './state.js';

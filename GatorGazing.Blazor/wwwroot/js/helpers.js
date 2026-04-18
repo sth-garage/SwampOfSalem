@@ -3,7 +3,7 @@ import {
     SOCIAL_START, DIALOGUE, INVITE_LINES, THOUGHTS, RELATION_THOUGHTS,
     SKIN_TONES, HAT_STYLES, SHIRT_COLORS, HOUSE_COLORS, NAMES,
     PERSONALITY_EMOJI
-} from './constants.js';
+} from './gameConfig.js';
 
 // ── Random helpers ────────────────────────────────────────────
 export const rnd  = n => Math.floor(Math.random() * n);

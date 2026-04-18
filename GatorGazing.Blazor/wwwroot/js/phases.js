@@ -5,12 +5,13 @@ import {
     MURDERER_BLUFF, MEMORY_STRENGTH, MAX_DEBATE_SPEAKERS,
     DEBATE_SPEAK_COOLDOWN, VICTIM_REACT_LINES, THEFT_WITNESS_LINES,
     ORANGE_PRICE, DEBATE_ARGUMENT_LINES
-} from './constants.js';
+} from './gameConfig.js';
 import { rnd, rndF, pickThought, thoughtDelayMs, speakDelayMs, pickBucketed } from './helpers.js';
 import { living } from './people.js';
 import { state } from './state.js';
 import { renderAllPeople, updateStats, updatePhaseLabel, updateHouseGuests, showDeadBody } from './rendering.js';
 import { processNightThefts } from './store.js';
+import { requestDialog, requestThought, requestVote, recordMemory } from './agentQueue.js';
 
 // ── Helpers ───────────────────────────────────────────────────
 function setNightOverlay(night) {
@@ -64,6 +65,9 @@ export function triggerNightfall() {
     state.isNight        = true;
     state.cycleTimer     = NIGHT_TICKS;
     state.nightVictimId  = (murderVictim() || {id: null}).id;
+    if (state.nightVictimId !== null) {
+        recordMemory(state.murdererId, state.dayNumber, 'murder', `Murdered ${state.people.find(p => p.id === state.nightVictimId)?.name || 'someone'}`, state.nightVictimId);
+    }
     for (const p of living()) {
         if (p.talkingTo !== null) {
             const partner = state.people.find(q => q.id === p.talkingTo);
@@ -104,8 +108,8 @@ export function triggerDawn() {
 
     // Victim reactions: outrage + suspicion based on observed spending
     for (const victim of living().filter(p => p.stolenFrom)) {
-        victim.thought  = pickBucketed(VICTIM_REACT_LINES, victim.personality);
-        victim.message  = victim.thought;
+        const victimCtx = `You discovered someone stole money from you during the night! You are outraged.`;
+        requestDialog(victim, 'mourn', pickBucketed(VICTIM_REACT_LINES, victim.personality), null, victimCtx);
         victim.nextThoughtAt = Date.now() + 4000;
         // Suspect those seen buying many oranges, weighted by dislike
         for (const q of living()) {
@@ -125,7 +129,7 @@ export function triggerDawn() {
     // Witnesses react
     for (const witness of living().filter(p => p.witnessedThefts.length > 0 &&
             p.witnessedThefts.some(t => t.day === state.dayNumber))) {
-        witness.message = pickBucketed(THEFT_WITNESS_LINES, witness.personality);
+        requestDialog(witness, 'mourn', pickBucketed(THEFT_WITNESS_LINES, witness.personality), null, 'You witnessed a theft during the night.');
     }
 
     for (const p of living()) {
@@ -135,11 +139,20 @@ export function triggerDawn() {
         p.ticksLeft = 2 + rnd(3);
         p.x = h.doorX + rndF(16) - 8;
         p.y = h.doorY + rndF(16) - 8;
-        p.thought = p.id === state.murdererId
+        const isMurderer = p.id === state.murdererId;
+        const thoughtFallback = isMurderer
             ? pickBucketed(DAWN_THOUGHTS_MURDERER, p.personality)
             : pickBucketed(DAWN_THOUGHTS_INNOCENT, p.personality);
+        const thoughtCtx = isMurderer
+            ? 'It is dawn. Someone was murdered last night — by you. Think something secretly satisfied.'
+            : 'It is dawn. Someone was murdered last night. Think about how you feel.';
+        requestThought(p, thoughtFallback);
         p.nextThoughtAt = Date.now() + thoughtDelayMs(p.thoughtStat);
-        p.message = pickBucketed(MOURN_LINES, p.personality);
+        const mournCtx = state.nightVictimId !== null
+            ? `${state.people.find(q => q.id === state.nightVictimId)?.name || 'Someone'} was found dead this morning.`
+            : 'Another night has passed in the swamp.';
+        requestDialog(p, 'mourn', pickBucketed(MOURN_LINES, p.personality), null, mournCtx);
+        recordMemory(p.id, state.dayNumber, 'dawn', mournCtx, state.nightVictimId);
     }
     updateHouseGuests();
     renderAllPeople();
@@ -182,6 +195,7 @@ export function triggerDebate() {
                 (p.suspicion[suspect.id] ?? 0) +
                 (p.id === state.murdererId ? 80 : 0));
         }
+        recordMemory(p.id, state.dayNumber, 'debate_start', `Debate began. Most suspicious of ${suspect?.name || 'no one'}.`, suspect?.id ?? null);
     }
 
     // Stagger: give each person a random initial delay
@@ -191,21 +205,23 @@ export function triggerDebate() {
         if (i < MAX_DEBATE_SPEAKERS) {
             // First speakers say something immediately
             const suspect = pickDebateSuspect(p);
-            let msg;
+            let fallback;
             if (suspect) {
-                // Alternate between accusation and backing argument
                 if (Math.random() < 0.5) {
-                    msg = pickBucketed(DEBATE_ARGUMENT_LINES, p.personality).replace('{name}', suspect.name);
+                    fallback = pickBucketed(DEBATE_ARGUMENT_LINES, p.personality).replace('{name}', suspect.name);
                 } else {
-                    msg = pickBucketed(ACCUSE_LINES, p.personality).replace('{name}', suspect.name);
+                    fallback = pickBucketed(ACCUSE_LINES, p.personality).replace('{name}', suspect.name);
                 }
-                p.history.push({ day: state.dayNumber, type: 'debate_accused', target: suspect.id, detail: `Accused ${suspect.name} during debate: "${msg}"` });
+                const ctx = `Debate is starting. You suspect ${suspect.name}. Make your opening accusation.`;
+                requestDialog(p, 'accusation', fallback, suspect.id, ctx);
+                p.history.push({ day: state.dayNumber, type: 'debate_accused', target: suspect.id, detail: `Accused ${suspect.name} during debate` });
             } else {
-                msg = pickBucketed(DEFEND_LINES, p.personality);
+                fallback = pickBucketed(DEFEND_LINES, p.personality);
+                const ctx = 'Debate is starting. Others may suspect you. Defend yourself.';
+                requestDialog(p, 'defense', fallback, null, ctx);
                 p.history.push({ day: state.dayNumber, type: 'debate_defended', detail: `Defended self during debate` });
             }
-            p.message      = msg;
-            p.thought      = msg;
+            p.thought      = fallback;
             p.nextThoughtAt = Date.now() + thoughtDelayMs(p.thoughtStat);
             // Next debate utterance on their own independent schedule
             const debateMs = 3000 + Math.random() * 5000;
@@ -262,15 +278,49 @@ export function showNextVoter() {
     if (state.voteIndex >= state.voteOrder.length) { triggerExecute(); return; }
 
     const voter  = state.voteOrder[state.voteIndex];
-    const target = decideVote(voter);
+    const target = decideVote(voter);  // JS fallback decision
+
+    // Build debate summary for agent context
+    const debateSummary = living().map(p => {
+        const msgs = p.history.filter(h => h.day === state.dayNumber && h.type.startsWith('debate_'));
+        return msgs.length > 0 ? `${p.name}: ${msgs.map(m => m.detail).join('; ')}` : null;
+    }).filter(Boolean).join('\n');
+
+    const candidateIds = living().filter(q => q.id !== voter.id).map(q => q.id);
+
+    // Try agent vote (async), use JS fallback immediately
     if (target) {
         state.voteResults[target.id] = (state.voteResults[target.id] || 0) + 1;
         state.voteHistory.push({ voterId: voter.id, targetId: target.id });
-        voter.message = `I vote ${target.name}!`;
+        const fallbackMsg = `I vote ${target.name}!`;
+        const ctx = `You are casting your vote. Previous votes: ${JSON.stringify(state.voteResults)}. You chose ${target.name}.`;
+        requestDialog(voter, 'vote_announce', fallbackMsg, target.id, ctx);
         voter.history.push({ day: state.dayNumber, type: 'voted', target: target.id, detail: `Voted for ${target.name}` });
+        recordMemory(voter.id, state.dayNumber, 'voted', `Voted for ${target.name}`, target.id);
     } else {
         voter.message = '...I abstain.';
         voter.history.push({ day: state.dayNumber, type: 'abstained', detail: `Abstained from voting` });
+    }
+
+    // Also try to get the agent's own vote decision (may override JS if it arrives fast)
+    if (candidateIds.length > 0) {
+        requestVote(voter, candidateIds, debateSummary).then(agentVoteId => {
+            if (agentVoteId !== null && agentVoteId !== (target?.id ?? null)) {
+                // Agent chose differently - update vote results
+                if (target) {
+                    state.voteResults[target.id] = Math.max(0, (state.voteResults[target.id] || 0) - 1);
+                }
+                state.voteResults[agentVoteId] = (state.voteResults[agentVoteId] || 0) + 1;
+                const agentTarget = state.people.find(q => q.id === agentVoteId);
+                if (agentTarget) {
+                    // Update the last vote history entry
+                    const lastVote = state.voteHistory.findLast(v => v.voterId === voter.id);
+                    if (lastVote) lastVote.targetId = agentVoteId;
+                    voter.message = `I vote ${agentTarget.name}!`;
+                }
+                updateVoteTally();
+            }
+        });
     }
 
     const voterEl = document.getElementById(`person-${voter.id}`);
@@ -354,7 +404,8 @@ export function triggerExecute() {
     if (condemned) {
         condemned.activity  = 'moving';
         condemned.indoors   = false;
-        condemned.message   = 'No... please!';
+        const pleaCtx = 'You have been voted to be executed. The crowd is watching as you walk to the centre.';
+        requestDialog(condemned, 'execute_plea', 'No... please!', null, pleaCtx);
         condemned.ticksLeft = 999;
 
         const worldEl = document.getElementById('world');
@@ -366,9 +417,13 @@ export function triggerExecute() {
 
         for (const p of living()) {
             if (p.id === state.condemnedId) continue;
-            p.message = p.id === state.murdererId
-                ? pickBucketed(MURDERER_BLUFF, p.personality)
-                : pickBucketed(MOURN_LINES, p.personality);
+            const reactCtx = `${condemned.name} is being walked to the centre to be executed. You are watching.`;
+            if (p.id === state.murdererId) {
+                requestDialog(p, 'execute_react', pickBucketed(MURDERER_BLUFF, p.personality), condemned.id, reactCtx + ' You are the real murderer — act relieved or deflect.');
+            } else {
+                requestDialog(p, 'execute_react', pickBucketed(MOURN_LINES, p.personality), condemned.id, reactCtx);
+            }
+            recordMemory(p.id, state.dayNumber, 'execution', `Watched ${condemned.name} be executed`, condemned.id);
         }
     }
 
@@ -440,6 +495,7 @@ export function finaliseExecution() {
         p.targetX = h.doorX + rndF(80) - 40;
         p.targetY = h.doorY + rndF(80) - 40;
         p.thought = pickThought(p.personality);
+        requestThought(p, pickThought(p.personality));
         p.nextThoughtAt = Date.now() + thoughtDelayMs(p.thoughtStat);
     }
     renderAllPeople();

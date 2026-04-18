@@ -7,7 +7,7 @@ import {
     SHOP_LINES, ORANGE_BUY_LINES, OPINION_SHARE_LINES_POS, OPINION_SHARE_LINES_NEG,
     OBSERVE_SHOP_RADIUS, ORANGE_PRICE, APPLE_PRICE,
     GUARDED_LINES, LIE_INCRIMINATE_LINES, DEBATE_ARGUMENT_LINES
-} from './constants.js';
+} from './gameConfig.js';
 import {
     rnd, rndF, rndTicks, pickMessage, pickInvite, pickThought,
     pickRelationThought, stageBounds, dist, weightedPick,
@@ -30,6 +30,7 @@ import {
     pinTooltip, refreshPinnedTooltip
 } from './rendering.js';
 import { buyFruit } from './store.js';
+import { requestDialog, requestThought, requestVote, recordMemory, setDialogSource, getDialogSource } from './agentQueue.js';
 
 // ── Opinion sharing helper ────────────────────────────────────
 function _maybeShareOpinion(speaker, listener) {
@@ -44,7 +45,8 @@ function _maybeShareOpinion(speaker, listener) {
         // Guarded: say little, or actively lie
         if (Math.random() < 0.5) {
             // Guarded response
-            speaker.message = pickBucketed(GUARDED_LINES, speaker.personality);
+            const ctx = `You are talking to ${listener.name} but you dislike them. Be evasive.`;
+            requestDialog(speaker, 'guarded', pickBucketed(GUARDED_LINES, speaker.personality), listener.id, ctx);
             speaker.nextSpeakAt = Date.now() + 2500;
             speaker.history.push({ day: state.dayNumber, type: 'guarded', with: listener.id, detail: `Was guarded talking to ${listener.name}` });
             return;
@@ -57,7 +59,8 @@ function _maybeShareOpinion(speaker, listener) {
                 const victim = victims[rnd(victims.length)];
                 const line = pickBucketed(LIE_INCRIMINATE_LINES, speaker.personality)
                     .replace('{target}', target.name).replace('{victim}', victim.name);
-                speaker.message = line;
+                const ctx = `You are lying to ${listener.name} to frame ${target.name}. Blame ${target.name} for something ${victim.name} experienced.`;
+                requestDialog(speaker, 'opinion', line, listener.id, ctx);
                 speaker.nextSpeakAt = Date.now() + 2500;
                 // Listener adjusts suspicion of the target
                 const trust = Math.max(0, listener.relations[speaker.id] ?? 0);
@@ -87,7 +90,9 @@ function _maybeShareOpinion(speaker, listener) {
 
     const isPositive = opinion >= 0;
     const lines = isPositive ? OPINION_SHARE_LINES_POS : OPINION_SHARE_LINES_NEG;
-    speaker.message = pickBucketed(lines, speaker.personality).replace('{name}', target.name);
+    const fallback = pickBucketed(lines, speaker.personality).replace('{name}', target.name);
+    const ctx = `You are sharing your ${isPositive ? 'positive' : 'negative'} opinion about ${target.name} with ${listener.name}.`;
+    requestDialog(speaker, 'opinion', fallback, listener.id, ctx);
     speaker.nextSpeakAt = Date.now() + 2500;
 
     // Listener adjusts their opinion of the target based on how much they trust the speaker
@@ -214,17 +219,20 @@ function tick() {
         // Day-phase speech: murderer bluff or normal chatter
         if (state.gamePhase === PHASE.DAY && person.id === state.murdererId && person.activity === 'talking') {
             if (canSpeak && Math.random() < 0.3) {
-                person.message = pickBucketed(MURDERER_BLUFF, person.personality);
+                const partner = person.talkingTo !== null ? state.people.find(q => q.id === person.talkingTo) : null;
+                const ctx = partner ? `You are casually talking to ${partner.name}. Deflect suspicion subtly.` : null;
+                requestDialog(person, 'bluff', pickBucketed(MURDERER_BLUFF, person.personality), partner?.id ?? null, ctx);
                 person.nextSpeakAt = now + speakDelayMs(person.socialStat);
             }
         } else if ((person.activity === 'talking' || person.activity === 'hosting') && person.ticksLeft > 0) {
             if (canSpeak) {
-                // If talking to someone they dislike, be guarded
                 const partner = person.talkingTo !== null ? state.people.find(q => q.id === person.talkingTo) : null;
                 if (partner && (person.relations[partner.id] ?? 0) < -40 && Math.random() < 0.4) {
-                    person.message = pickBucketed(GUARDED_LINES, person.personality);
+                    const ctx = `You dislike ${partner.name}. They said: "${partner.message || '...'}"`;
+                    requestDialog(person, 'guarded', pickBucketed(GUARDED_LINES, person.personality), partner?.id, ctx);
                 } else {
-                    person.message = pickMessage(person.personality);
+                    const ctx = partner ? `You are chatting with ${partner.name}. They said: "${partner.message || '...'}"` : null;
+                    requestDialog(person, 'conversation', pickMessage(person.personality), partner?.id ?? null, ctx);
                 }
                 person.nextSpeakAt = now + speakDelayMs(person.socialStat);
             }
@@ -232,14 +240,16 @@ function tick() {
             if (canSpeak && debateSpeakerCount < MAX_DEBATE_SPEAKERS) {
                 const suspect = pickDebateSuspect(person);
                 if (suspect) {
-                    // Alternate between accusation and backing argument
+                    const recentMessages = living().filter(q => q.message && q.id !== person.id).map(q => `${q.name}: "${q.message}"`).slice(0, 3).join('; ');
+                    const ctx = `Debate about the murder. You suspect ${suspect.name}. Recent discussion: ${recentMessages || 'none yet'}`;
                     if (Math.random() < 0.45) {
-                        person.message = pickBucketed(DEBATE_ARGUMENT_LINES, person.personality).replace('{name}', suspect.name);
+                        requestDialog(person, 'debate', pickBucketed(DEBATE_ARGUMENT_LINES, person.personality).replace('{name}', suspect.name), suspect.id, ctx);
                     } else {
-                        person.message = pickBucketed(ACCUSE_LINES, person.personality).replace('{name}', suspect.name);
+                        requestDialog(person, 'accusation', pickBucketed(ACCUSE_LINES, person.personality).replace('{name}', suspect.name), suspect.id, ctx);
                     }
                 } else {
-                    person.message = pickBucketed(DEFEND_LINES, person.personality);
+                    const ctx = 'Debate about the murder. Others may suspect you. Defend yourself.';
+                    requestDialog(person, 'defense', pickBucketed(DEFEND_LINES, person.personality), null, ctx);
                 }
 
                 // Persuasion: high-conviction persons try to convince liked neighbours
@@ -256,7 +266,8 @@ function tick() {
                             (listener.suspicion[suspect.id] ?? 0) + influence);
                         listener.conviction = Math.min(100, Math.max(
                             listener.conviction, listener.suspicion[suspect.id]));
-                        person.message = pickBucketed(PERSUADE_LINES, person.personality).replace('{name}', suspect.name);
+                        const ctx = `You are trying to convince ${listener.name} to vote for ${suspect.name}. ${listener.name} ${liking > 50 ? 'trusts you' : 'is neutral toward you'}.`;
+                        requestDialog(person, 'persuade', pickBucketed(PERSUADE_LINES, person.personality).replace('{name}', suspect.name), suspect.id, ctx);
                         person.history.push({ day: state.dayNumber, type: 'persuaded', target: listener.id, about: suspect.id, detail: `Tried to convince ${listener.name} that ${suspect.name} is guilty` });
                     }
                 }
@@ -278,10 +289,14 @@ function tick() {
             const partner = state.people.find(p => p.id === person.talkingTo);
             if (partner && partner.talkingTo === person.id) {
                 driftRelations(person, partner);
-                person.thought  = pickRelationThought(person.relations[partner.id] ?? 0);
-                partner.thought = pickRelationThought(partner.relations[person.id] ?? 0);
+                const pCtx = `You just finished talking with ${partner.name}. You feel ${person.relations[partner.id] > 20 ? 'good' : person.relations[partner.id] < -20 ? 'bad' : 'neutral'} about them.`;
+                const qCtx = `You just finished talking with ${person.name}. You feel ${partner.relations[person.id] > 20 ? 'good' : partner.relations[person.id] < -20 ? 'bad' : 'neutral'} about them.`;
+                requestThought(person, pickRelationThought(person.relations[partner.id] ?? 0));
+                requestThought(partner, pickRelationThought(partner.relations[person.id] ?? 0));
                 person.nextThoughtAt  = Date.now() + thoughtDelayMs(person.thoughtStat);
                 partner.nextThoughtAt = Date.now() + thoughtDelayMs(partner.thoughtStat);
+                recordMemory(person.id, state.dayNumber, 'conversation_end', `Finished talking with ${partner.name}`, partner.id);
+                recordMemory(partner.id, state.dayNumber, 'conversation_end', `Finished talking with ${person.name}`, person.id);
                 // Record conversation in history
                 const pFeels = person.relations[partner.id] ?? 0;
                 const qFeels = partner.relations[person.id] ?? 0;
@@ -346,7 +361,7 @@ function tick() {
             const boughtApples  = !person.orangeLover || boughtOranges === 0
                 ? buyFruit(person, 'apple') : 0;
             if (boughtOranges > 0) {
-                person.message = pickBucketed(ORANGE_BUY_LINES, person.personality);
+                requestDialog(person, 'conversation', pickBucketed(ORANGE_BUY_LINES, person.personality), null, 'You just bought swordfish at the fish market! Express your excitement.');
                 person.nextSpeakAt = Date.now() + 2000;
                 // Nearby people observe the orange purchase
                 for (const obs of living()) {
@@ -357,7 +372,7 @@ function tick() {
                     }
                 }
             } else if (boughtApples > 0) {
-                person.message = pickBucketed(SHOP_LINES, person.personality);
+                requestDialog(person, 'conversation', pickBucketed(SHOP_LINES, person.personality), null, 'You just bought catfish at the fish market.');
                 person.nextSpeakAt = Date.now() + 1500;
             }
             person.indoors  = false;
@@ -387,13 +402,13 @@ function tick() {
                 });
                 const dur = rndTicks('talking');
                 person.activity  = 'talking'; person.talkingTo = partner.id; person.ticksLeft = dur;
-                person.message   = pickMessage(person.personality);
-                // Each person speaks on their own real-time schedule
+                requestDialog(person, 'conversation', pickMessage(person.personality), partner.id, `You just started a conversation with ${partner.name}.`);
                 person.nextSpeakAt  = Date.now() + speakDelayMs(person.socialStat);
                 partner.activity = 'talking'; partner.talkingTo = person.id; partner.ticksLeft = dur;
-                partner.message  = pickMessage(partner.personality);
-                // Partner's reply comes on their own independent delay (naturally later)
+                requestDialog(partner, 'conversation', pickMessage(partner.personality), person.id, `${person.name} just started talking to you.`);
                 partner.nextSpeakAt = Date.now() + speakDelayMs(partner.socialStat) + 800 + Math.round(Math.random() * 1200);
+                recordMemory(person.id, state.dayNumber, 'conversation_start', `Started talking with ${partner.name}`, partner.id);
+                recordMemory(partner.id, state.dayNumber, 'conversation_start', `${person.name} started talking to me`, person.id);
                 free.delete(person.id);
                 free.delete(partner.id);
                 continue;
@@ -422,7 +437,7 @@ function tick() {
                 person.activity   = 'hosting';
                 person.indoors    = true;
                 person.ticksLeft  = rndTicks('hosting');
-                person.message    = pickInvite();
+                requestDialog(person, 'invite', pickInvite(), guest.id, `You are inviting ${guest.name} to your lilypad.`);
                 person.nextSpeakAt = Date.now() + speakDelayMs(person.socialStat);
                 const h = state.houses[person.homeIndex];
                 person.targetX    = h.doorX;
@@ -493,7 +508,7 @@ function gameLoop() {
             // ── Per-person thought updates (real-time, fully independent) ──────
             const nowMs = Date.now();
             if (nowMs >= p.nextThoughtAt) {
-                p.thought = pickThought(p.personality);
+                requestThought(p, pickThought(p.personality));
                 p.nextThoughtAt = nowMs + thoughtDelayMs(p.thoughtStat);
                 // Sync thought bubble text immediately so it doesn't wait for next tick
                 const tEl = state.thoughts.get(p.id);
@@ -778,11 +793,36 @@ function spawnPeople() {
 
     updateStats();
     updatePhaseLabel();
+
+    // Initialize SK agents on the .NET side with the spawned alligator data
+    if (window._agentInterop) {
+        const alligatorData = state.people.map(p => ({
+            id: p.id,
+            name: p.name,
+            personality: p.personality,
+            isMurderer: p.id === state.murdererId,
+            isLiar: p.liar
+        }));
+        window._agentInterop.invokeMethodAsync('InitializeAgents', alligatorData)
+            .then(() => console.log('SK agents initialized'))
+            .catch(err => console.warn('SK agent init failed (continuing without AI):', err));
+    }
+
     startAll();
 }
 
 // ── Module entry point ────────────────────────────────────────
-export function initSimulation() {
+// agentInterop: optional DotNetObjectReference passed from Blazor for SK agent calls
+export function initSimulation(agentInterop, dialogSource) {
+    // Store the .NET interop reference globally so other modules can call agent methods
+    if (agentInterop) {
+        window._agentInterop = agentInterop;
+    }
+    // Set dialog source mode: 'AI' or 'Local'
+    if (dialogSource) {
+        setDialogSource(dialogSource);
+    }
+
     initTooltip();
 
     document.getElementById('respawnBtn').addEventListener('click', spawnPeople);
@@ -799,6 +839,18 @@ export function initSimulation() {
             if (state.tickInterval) { clearInterval(state.tickInterval); state.tickInterval = null; }
         }
     });
+
+    // Dialog source toggle: AI ↔ Local
+    const dialogModeBtn = document.getElementById('dialogModeBtn');
+    if (dialogModeBtn) {
+        // Set initial label
+        dialogModeBtn.textContent = getDialogSource() === 'AI' ? '🤖 AI' : '💬 Local';
+        dialogModeBtn.addEventListener('click', () => {
+            const next = getDialogSource() === 'AI' ? 'Local' : 'AI';
+            setDialogSource(next);
+            dialogModeBtn.textContent = next === 'AI' ? '🤖 AI' : '💬 Local';
+        });
+    }
 
     window.addEventListener('resize', () => {
         const existing = document.getElementById('culdesac');

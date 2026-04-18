@@ -1,7 +1,7 @@
 import {
     PERSON_SIZE, PHASE, ACTIVITY_EMOJI, PERSONALITY_EMOJI,
     MOOD_MATRIX, MOOD_EMOJI, PEOPLE_COUNT
-} from './constants.js';
+} from './gameConfig.js';
 import { socialColor, relationEmoji, relationColor } from './helpers.js';
 import { living } from './people.js';
 import { state } from './state.js';

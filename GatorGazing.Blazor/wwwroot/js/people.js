@@ -2,7 +2,7 @@ import {
     PERSON_SIZE, SOCIAL_URGENT, ACTIVITY_WEIGHTS, WALK_SPEED,
     SOCIAL_START, LIAR_CHANCE, COMPAT, PERSONALITIES, NAMES,
     THOUGHT_STAT_BASE, SOCIAL_STAT_BASE, ORANGE_LOVER_CHANCE
-} from './constants.js';
+} from './gameConfig.js';
 import {
     rnd, rndF, hsl, rndTicks, pickThought, randomAppearance, stageBounds,
     thoughtDelayMs

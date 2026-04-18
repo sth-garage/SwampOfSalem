@@ -76,7 +76,7 @@
 <body>
 
 <h1>🐊 SwampWatcher – Copilot Chat Session</h1>
-<p class="meta">Project: <code>PeopleWatcher.Blazor</code> · .NET 10 · Blazor WebAssembly · Generated summary</p>
+<p class="meta">Project: <code>GatorGazing</code> · .NET 10 · Blazor WebAssembly + Semantic Kernel · Generated summary</p>
 
 <hr>
 
@@ -1039,6 +1039,322 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
       <li><code>PeopleWatcher.Blazor\Layout\NavMenu.razor</code> — brand name → SwampWatcher</li>
       <li><code>PeopleWatcher.Blazor\wwwroot\index.html</code> — page title → SwampWatcher</li>
       <li><code>PeopleWatcher.Blazor\chat-summary.html</code> — updated with Turn 19</li>
+    </ul>
+  </div>
+</div>
+
+
+<hr>
+
+<!-- ══════════════════════════════════════════════ TURN 20 ═══ -->
+<h2>Turn 20 &mdash; Multi-project architecture: Shared, AppLogic, SK</h2>
+<div class="turn">
+  <div class="turn-user">
+    <div class="role role-user">User</div>
+    Create GatorGazing.Shared (shared models/DTOs), GatorGazing.AppLogic (game logic outside AI),
+    and GatorGazing.SK (Semantic Kernel / AI). Each alligator is driven by an agent that can communicate
+    with one or more other agents. Agents must remember past actions &mdash; both their own and those observed
+    through others.
+  </div>
+</div>
+<div class="turn">
+  <div class="turn-assistant">
+    <div class="role role-copilot">GitHub Copilot</div>
+
+    <h3>New projects</h3>
+    <table>
+      <thead><tr><th>Project</th><th>Type</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td><code>GatorGazing.Shared</code></td><td>Class library</td><td>Enums (<code>GamePhase</code>, <code>Personality</code>, <code>DialogType</code>), domain models (<code>Alligator</code>, <code>GameState</code>), and DTOs (<code>AgentDialogRequest/Response</code>, <code>AgentVoteRequest/Response</code>, <code>AgentMemoryRequest</code>)</td></tr>
+        <tr><td><code>GatorGazing.AppLogic</code></td><td>Class library</td><td>Pure game-rule services: <code>PhaseManager</code>, <code>MurderService</code>, <code>VoteService</code> (clockwise ordering, tallying, execution), <code>RelationshipService</code></td></tr>
+        <tr><td><code>GatorGazing.SK</code></td><td>Class library</td><td>Semantic Kernel agent layer: <code>GatorAgentService</code> (one <code>ChatCompletionAgent</code> per alligator with per-agent <code>ChatHistory</code> memory), <code>SwampPlugin</code> (tool functions for relationships, suspicion, memories), <code>PersonalityPrompts</code> (personality-specific system prompts with murderer/liar overrides)</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Key design: per-agent memory</h3>
+    <ul>
+      <li>Each alligator agent maintains its own <code>ChatHistory</code> &mdash; every dialog, observation, and vote is appended so the LLM sees the full personal timeline when generating responses.</li>
+      <li><code>AddMemory(alligatorId, memory)</code> inserts user-role entries so the agent &ldquo;remembers&rdquo; observed events (e.g. &ldquo;Fang voted for Chomps on Day 2&rdquo;).</li>
+      <li>The <code>SwampPlugin</code> exposes <code>GetRecentMemories</code>, <code>GetRelationship</code>, <code>GetSuspicion</code>, and <code>GetAlligatorInfo</code> as Semantic Kernel tool functions the agent can call during inference.</li>
+    </ul>
+
+    <h3>Debate &amp; vote architecture</h3>
+    <ul>
+      <li>Debate: <code>RunDebateRoundAsync(alligatorIds, topic)</code> generates one round of simultaneous discussion messages from all agents.</li>
+      <li>Vote: <code>GetVoteAsync(alligatorId, candidateIds, debateSummary)</code> asks each agent individually who to vote for, producing a clockwise sequential vote.</li>
+    </ul>
+
+    <h3>Solution updated</h3>
+    <p><code>GatorGazing.slnx</code> now contains all four projects: <code>GatorGazing.Blazor</code>, <code>GatorGazing.Shared</code>, <code>GatorGazing.AppLogic</code>, and <code>GatorGazing.SK</code>.</p>
+
+    <h3>Files created</h3>
+    <ul>
+      <li><code>GatorGazing.Shared/</code> &mdash; Enums/, Models/, DTOs/ with all shared types</li>
+      <li><code>GatorGazing.AppLogic/</code> &mdash; Services/ with PhaseManager, MurderService, VoteService, RelationshipService</li>
+      <li><code>GatorGazing.SK/</code> &mdash; Agents/GatorAgentService.cs, Plugins/SwampPlugin.cs, Prompts/PersonalityPrompts.cs</li>
+    </ul>
+  </div>
+</div>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════ TURN 21 ═══ -->
+<h2>Turn 21 &mdash; Combine SK into Blazor (in-process), remove separate host</h2>
+<div class="turn">
+  <div class="turn-user">
+    <div class="role role-user">User</div>
+    I don&rsquo;t want to run GatorGazing.SK as a separate app, combine them.
+  </div>
+</div>
+<div class="turn">
+  <div class="turn-assistant">
+    <div class="role role-copilot">GitHub Copilot</div>
+
+    <h3>Architecture change</h3>
+    <p><code>GatorGazing.SK</code> was converted from an ASP.NET Core web application to a plain class library. All HTTP
+    host files (<code>Program.cs</code>, <code>Controllers/</code>, <code>launchSettings.json</code>) were removed. The Blazor
+    WASM app now references <code>GatorGazing.SK</code> directly and registers its services in-process.</p>
+
+    <h3>Blazor integration</h3>
+    <ul>
+      <li><code>Program.cs</code> registers <code>builder.Services.AddKernel()</code>, the chat-completion provider, and
+        <code>GatorAgentService</code> + <code>GameState</code> as singletons.</li>
+      <li><code>AgentInterop.cs</code> &mdash; new JS-invokable bridge class that calls <code>GatorAgentService</code> directly
+        (no HTTP). Exposes <code>GetAgentDialog</code>, <code>GetAgentThought</code>, <code>GetAgentVote</code>, and
+        <code>AddAgentMemory</code>.</li>
+      <li><code>Home.razor</code> injects <code>GatorAgentService</code>, creates a <code>DotNetObjectReference&lt;AgentInterop&gt;</code>,
+        and passes it to JS via <code>initSimulation(interopRef)</code>.</li>
+      <li><code>agentBridge.js</code> reads <code>window._agentInterop</code> and forwards calls to the .NET interop object;
+        falls back gracefully to <code>null</code> when unavailable.</li>
+    </ul>
+
+    <h3>Build fix</h3>
+    <p>An ambiguous <code>FirstOrDefaultAsync</code> call (conflict between .NET 10 async LINQ and NuGet extensions)
+    was resolved by replacing it with a custom <code>GetFirstResponseAsync()</code> helper that manually awaits the
+    first item from the agent&rsquo;s async response stream.</p>
+
+    <h3>Files created</h3>
+    <ul>
+      <li><code>GatorGazing.Blazor/Interop/AgentInterop.cs</code></li>
+      <li><code>GatorGazing.Blazor/wwwroot/js/agentBridge.js</code></li>
+    </ul>
+    <h3>Files modified</h3>
+    <ul>
+      <li><code>GatorGazing.SK/GatorGazing.SK.csproj</code> &mdash; changed to class library, removed host dependencies</li>
+      <li><code>GatorGazing.Blazor/GatorGazing.Blazor.csproj</code> &mdash; added ProjectReference to GatorGazing.SK</li>
+      <li><code>GatorGazing.Blazor/Program.cs</code> &mdash; registers Semantic Kernel, GatorAgentService, GameState</li>
+      <li><code>GatorGazing.Blazor/Pages/Home.razor</code> &mdash; injects agent service, passes interop to JS</li>
+    </ul>
+  </div>
+</div>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════ TURN 22 ═══ -->
+<h2>Turn 22 &mdash; Local LLM support via OpenAI-compatible endpoint</h2>
+<div class="turn">
+  <div class="turn-user">
+    <div class="role role-user">User</div>
+    Add support for a local LLM option using OpenAI.
+  </div>
+</div>
+<div class="turn">
+  <div class="turn-assistant">
+    <div class="role role-copilot">GitHub Copilot</div>
+
+    <h3>Dual LLM provider support</h3>
+    <p><code>Program.cs</code> now reads <code>LLM:Provider</code> from <code>wwwroot/appsettings.json</code> and configures
+    Semantic Kernel accordingly:</p>
+    <table>
+      <thead><tr><th>Provider</th><th>Config keys</th><th>Works with</th></tr></thead>
+      <tbody>
+        <tr><td><code>AzureOpenAI</code></td><td><code>LLM:AzureOpenAI:Endpoint</code>, <code>ApiKey</code>, <code>DeploymentName</code></td><td>Azure OpenAI Service</td></tr>
+        <tr><td><code>OpenAI</code> (default)</td><td><code>LLM:OpenAI:Endpoint</code>, <code>ModelId</code>, <code>ApiKey</code></td><td>Ollama, LM Studio, llama.cpp, vLLM, or any OpenAI-compatible server</td></tr>
+      </tbody>
+    </table>
+    <p>Default configuration points to <code>http://localhost:11434/v1</code> (Ollama) with model <code>llama3</code> and
+    <code>apiKey: "not-needed"</code>.</p>
+
+    <h3>Files modified</h3>
+    <ul>
+      <li><code>GatorGazing.Blazor/Program.cs</code> &mdash; dual provider switch</li>
+      <li><code>GatorGazing.Blazor/wwwroot/appsettings.json</code> &mdash; added LLM configuration section</li>
+    </ul>
+  </div>
+</div>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════ TURN 23 ═══ -->
+<h2>Turn 23 &mdash; UI wiring gap identified</h2>
+<div class="turn">
+  <div class="turn-user">
+    <div class="role role-user">User</div>
+    I&rsquo;m not seeing the actual agents from SK being used, it doesn&rsquo;t look like the UI is hooked up.
+  </div>
+</div>
+<div class="turn">
+  <div class="turn-assistant">
+    <div class="role role-copilot">GitHub Copilot</div>
+
+    <h3>Diagnosis</h3>
+    <p>The backend architecture is complete and builds successfully: <code>GatorAgentService</code> is registered,
+    <code>AgentInterop</code> is JS-invokable, and <code>agentBridge.js</code> exports all required functions. However,
+    <strong>the JavaScript simulation (<code>simulation.js</code> and friends) still uses its own deterministic JS logic</strong>
+    for dialog, thoughts, accusations, and votes. The bridge functions in <code>agentBridge.js</code> are never called from
+    the simulation code.</p>
+
+    <h3>Integration points that need wiring</h3>
+    <table>
+      <thead><tr><th>Simulation behaviour</th><th>Current source</th><th>Should call</th></tr></thead>
+      <tbody>
+        <tr><td>Day conversation dialog</td><td>Hardcoded JS message arrays</td><td><code>agentBridge.getAgentDialog(id, "conversation", targetId)</code></td></tr>
+        <tr><td>Thought bubbles</td><td><code>pickThought(personality)</code> from JS arrays</td><td><code>agentBridge.getAgentThought(id)</code></td></tr>
+        <tr><td>Debate accusations</td><td><code>pickDebateSuspect()</code> + JS accusation lines</td><td><code>agentBridge.getAgentDialog(id, "accusation")</code></td></tr>
+        <tr><td>Vote decisions</td><td>Weighted random from relations/suspicion</td><td><code>agentBridge.getAgentVote(id, candidateIds, debateSummary)</code></td></tr>
+        <tr><td>Memory recording</td><td>Not recorded to agents</td><td><code>agentBridge.addAgentMemory(id, eventDescription)</code></td></tr>
+      </tbody>
+    </table>
+
+    <h3>Current status</h3>
+    <ul>
+      <li class="fix">Backend: ✅ Complete &mdash; GatorAgentService, AgentInterop, agentBridge.js all implemented</li>
+      <li class="bug">Frontend: ❌ Not wired &mdash; simulation.js still self-drives all interactions via legacy JS</li>
+      <li class="fix">Build: ✅ Solution compiles with 0 errors</li>
+    </ul>
+    <p><strong>Next step:</strong> Insert <code>agentBridge</code> calls into <code>simulation.js</code> at each interaction
+    point (with graceful fallback to the existing JS logic when no LLM is available).</p>
+  </div>
+</div>
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════ INDEX ═══ -->
+<h2>Full Session Index</h2>
+<table>
+  <thead><tr><th>#</th><th>Topic</th><th>Key files</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Fix error banner + no squares (CSS layout bugs)</td><td>people-watcher.css</td></tr>
+    <tr><td>2</td><td>SyntaxError: private field <code>#app</code> in JS</td><td>people-watcher.js</td></tr>
+    <tr><td>3</td><td><code>initSimulation</code> not a function</td><td>people-watcher.js</td></tr>
+    <tr><td>4</td><td>Boost talking frequency &times;5</td><td>people-watcher.js</td></tr>
+    <tr><td>5</td><td>Add chat-summary.html to solution</td><td>PeopleWatcher.slnx</td></tr>
+    <tr><td>6</td><td>Keep chat-summary updated</td><td>Memory saved</td></tr>
+    <tr><td>7</td><td>Stick-figure people, randomised appearance</td><td>people-watcher.css, people-watcher.js</td></tr>
+    <tr><td>8</td><td>Thought bubbles</td><td>people-watcher.css, people-watcher.js</td></tr>
+    <tr><td>9</td><td>Cul-de-sac, houses, hosting &amp; visiting</td><td>people-watcher.css, people-watcher.js</td></tr>
+    <tr><td>10</td><td>Update chat-summary</td><td>chat-summary.html</td></tr>
+    <tr><td>11</td><td>10 people and houses</td><td>people-watcher.js</td></tr>
+    <tr><td>12</td><td>Full relationship system</td><td>people-watcher.js</td></tr>
+    <tr><td>13</td><td>Half speed + day/night cycle</td><td>people-watcher.js, people-watcher.css, Home.razor</td></tr>
+    <tr><td>14</td><td>Mafia murder mystery game</td><td>people-watcher.js, people-watcher.css, Home.razor</td></tr>
+    <tr><td>15</td><td>Timing overhaul, sequential vote, memory &amp; persuasion</td><td>people-watcher.js</td></tr>
+    <tr><td>16</td><td>Vote tally + condemned walks to centre</td><td>people-watcher.js, people-watcher.css, Home.razor</td></tr>
+    <tr><td>17</td><td>Full bug-fix pass (12 bugs)</td><td>people-watcher.js</td></tr>
+    <tr><td>18</td><td>Staggered speech + modular 7-file split</td><td>constants/helpers/state/people/phases/rendering/simulation/main.js</td></tr>
+    <tr><td>19</td><td>Full swamp restyle: people &rarr; alligators</td><td>All JS modules, CSS, Home.razor, NavMenu.razor, index.html</td></tr>
+    <tr><td>20</td><td>Multi-project split: Shared, AppLogic, SK</td><td>GatorGazing.Shared/, GatorGazing.AppLogic/, GatorGazing.SK/, GatorGazing.slnx</td></tr>
+    <tr><td>21</td><td>Combine SK into Blazor (in-process)</td><td>AgentInterop.cs, agentBridge.js, Program.cs, Home.razor</td></tr>
+    <tr><td>22</td><td>Local LLM support (OpenAI-compatible)</td><td>Program.cs, appsettings.json</td></tr>
+    <tr><td>23</td><td>UI wiring gap diagnosed</td><td>simulation.js, agentBridge.js (not yet wired)</td></tr>
+    <tr><td>24</td><td>GatorAgentService initialization fix</td><td>AgentInterop.cs, GatorAgentService.cs, simulation.js, AlligatorSpawnData.cs</td></tr>
+    <tr><td>25</td><td>Route all dialog, thoughts &amp; votes through SK agents</td><td>agentQueue.js (new), simulation.js, phases.js, GatorAgentService.cs</td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════ TURN 24 ═══ -->
+<h2>Turn 24 &mdash; GatorAgentService initialization fix</h2>
+<div class="turn">
+  <div class="turn-user">
+    <div class="role role-user">User</div>
+    The GatorAgentService never seems to initialize.
+  </div>
+</div>
+<div class="turn">
+  <div class="turn-assistant">
+    <div class="role role-copilot">GitHub Copilot</div>
+    <h3>Root cause</h3>
+    <p><code>GatorAgentService.InitializeAgents()</code> was never called. The JS simulation creates
+    alligators entirely in JavaScript and never notified .NET, so <code>GameState.Alligators</code> was
+    always empty and no SK agents were created.</p>
+    <h3>Fix</h3>
+    <ul>
+      <li><code>GatorGazing.Shared/DTOs/AlligatorSpawnData.cs</code> (new) &mdash; lightweight DTO for JS &rarr; .NET alligator data</li>
+      <li><code>GatorAgentService.InitializeFromSpawnData()</code> &mdash; populates <code>GameState.Alligators</code> and calls <code>InitializeAgents()</code></li>
+      <li><code>AgentInterop.InitializeAgents(AlligatorSpawnData[])</code> &mdash; new <code>[JSInvokable]</code> method</li>
+      <li><code>simulation.js</code> &mdash; calls <code>window._agentInterop.invokeMethodAsync('InitializeAgents', ...)</code> after <code>spawnPeople()</code></li>
+    </ul>
+  </div>
+</div>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════ TURN 25 ═══ -->
+<h2>Turn 25 &mdash; Route all dialog, thoughts &amp; votes through SK agents</h2>
+<div class="turn">
+  <div class="turn-user">
+    <div class="role role-user">User</div>
+    Instead of using JS phrases for what they say or think, run all of those interactions through agents.
+    Allow the agents to respond with natural questions and answers, topics of conversations, etc.
+  </div>
+</div>
+<div class="turn">
+  <div class="turn-assistant">
+    <div class="role role-copilot">GitHub Copilot</div>
+
+    <h3>Architecture: async fire-and-forget with fallback</h3>
+    <p>New <code>agentQueue.js</code> module wraps <code>agentBridge.js</code> with a fire-and-forget pattern:
+    the simulation sets a JS fallback phrase immediately, fires an async LLM request, and overwrites the
+    message when the agent responds. If the agent is unavailable or slow, the fallback stays visible.
+    Duplicate in-flight requests are suppressed per person+type.</p>
+
+    <h3>Every interaction point wired</h3>
+    <table>
+      <thead><tr><th>Interaction</th><th>Before</th><th>After</th></tr></thead>
+      <tbody>
+        <tr><td>Day conversations</td><td><code>pickMessage(personality)</code></td><td><code>requestDialog(person, 'conversation', fallback, partnerId, context)</code></td></tr>
+        <tr><td>Murderer bluffs</td><td><code>pickBucketed(MURDERER_BLUFF)</code></td><td><code>requestDialog(person, 'bluff', fallback, partnerId)</code></td></tr>
+        <tr><td>Guarded responses</td><td><code>pickBucketed(GUARDED_LINES)</code></td><td><code>requestDialog(person, 'guarded', fallback, partnerId)</code></td></tr>
+        <tr><td>Opinion sharing</td><td><code>pickBucketed(OPINION_SHARE_LINES_*)</code></td><td><code>requestDialog(person, 'opinion', fallback, listenerId)</code></td></tr>
+        <tr><td>Lie incrimination</td><td><code>pickBucketed(LIE_INCRIMINATE_LINES)</code></td><td><code>requestDialog(person, 'opinion', fallback, listenerId)</code></td></tr>
+        <tr><td>Thought bubbles</td><td><code>pickThought(personality)</code></td><td><code>requestThought(person, fallback)</code></td></tr>
+        <tr><td>Post-conversation thoughts</td><td><code>pickRelationThought(val)</code></td><td><code>requestThought(person, fallback)</code></td></tr>
+        <tr><td>Dawn mourn lines</td><td><code>pickBucketed(MOURN_LINES)</code></td><td><code>requestDialog(person, 'mourn', fallback)</code></td></tr>
+        <tr><td>Dawn thoughts</td><td><code>pickBucketed(DAWN_THOUGHTS_*)</code></td><td><code>requestThought(person, fallback)</code></td></tr>
+        <tr><td>Debate accusations</td><td><code>pickBucketed(ACCUSE_LINES)</code></td><td><code>requestDialog(person, 'accusation', fallback, suspectId)</code></td></tr>
+        <tr><td>Debate arguments</td><td><code>pickBucketed(DEBATE_ARGUMENT_LINES)</code></td><td><code>requestDialog(person, 'debate', fallback, suspectId)</code></td></tr>
+        <tr><td>Debate defenses</td><td><code>pickBucketed(DEFEND_LINES)</code></td><td><code>requestDialog(person, 'defense', fallback)</code></td></tr>
+        <tr><td>Debate persuasion</td><td><code>pickBucketed(PERSUADE_LINES)</code></td><td><code>requestDialog(person, 'persuade', fallback, suspectId)</code></td></tr>
+        <tr><td>Vote decisions</td><td><code>decideVote(voter)</code> JS-only</td><td><code>requestVote(voter, candidateIds, debateSummary)</code> &mdash; async override</td></tr>
+        <tr><td>Vote announcements</td><td><code>"I vote {name}!"</code></td><td><code>requestDialog(voter, 'vote_announce', fallback, targetId)</code></td></tr>
+        <tr><td>Execution plea</td><td><code>"No... please!"</code></td><td><code>requestDialog(condemned, 'execute_plea', fallback)</code></td></tr>
+        <tr><td>Execution bystanders</td><td><code>pickBucketed(MOURN/BLUFF)</code></td><td><code>requestDialog(person, 'execute_react', fallback)</code></td></tr>
+        <tr><td>Shopping lines</td><td><code>pickBucketed(SHOP/ORANGE_BUY_LINES)</code></td><td><code>requestDialog(person, 'conversation', fallback)</code></td></tr>
+        <tr><td>Hosting invites</td><td><code>pickInvite()</code></td><td><code>requestDialog(person, 'invite', fallback, guestId)</code></td></tr>
+      </tbody>
+    </table>
+
+    <h3>Memory recording added</h3>
+    <p><code>recordMemory()</code> calls inserted at: conversation start/end, dawn events, debate start,
+    votes, executions, and murders. Each agent now accumulates a full timeline of observed events.</p>
+
+    <h3>Richer prompts in GatorAgentService</h3>
+    <p><code>BuildContextMessage()</code> now generates type-specific instructions for 15 dialog types
+    (conversation, thought, accusation, defense, debate, mourn, dawn_thought, bluff, opinion,
+    guarded, execute_plea, execute_react, vote_announce, persuade, invite). Each prompt includes
+    relationship context, game phase, and situational details.</p>
+
+    <h3>Files created</h3>
+    <ul>
+      <li><code>GatorGazing.Blazor/wwwroot/js/agentQueue.js</code> &mdash; async fire-and-forget wrapper with fallback and dedup</li>
+    </ul>
+    <h3>Files modified</h3>
+    <ul>
+      <li><code>GatorGazing.Blazor/wwwroot/js/simulation.js</code> &mdash; all conversation, thought, opinion, debate, shopping, and invite lines routed through <code>agentQueue</code></li>
+      <li><code>GatorGazing.Blazor/wwwroot/js/phases.js</code> &mdash; dawn, debate init, vote, execution reactions routed through <code>agentQueue</code></li>
+      <li><code>GatorGazing.SK/Agents/GatorAgentService.cs</code> &mdash; enhanced <code>BuildContextMessage</code> with 15 dialog-type-specific prompt templates</li>
     </ul>
   </div>
 </div>
