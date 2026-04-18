@@ -72,28 +72,6 @@ public static class GameConfigProvider
             ["ORANGE_LOVER_CHANCE"] = PersonalityConstants.OrangeLoverChance,
             ["MEMORY_STRENGTH"] = PersonalityConstants.MemoryStrength,
 
-            // DialogConstants
-            ["DIALOGUE"] = DialogConstants.Dialogue,
-            ["INVITE_LINES"] = DialogConstants.InviteLines,
-            ["THOUGHTS"] = DialogConstants.Thoughts,
-            ["MURDERER_BLUFF"] = DialogConstants.MurdererBluff,
-            ["ACCUSE_LINES"] = DialogConstants.AccuseLines,
-            ["DEFEND_LINES"] = DialogConstants.DefendLines,
-            ["MOURN_LINES"] = DialogConstants.MournLines,
-            ["DEBATE_ARGUMENT_LINES"] = DialogConstants.DebateArgumentLines,
-            ["GUARDED_LINES"] = DialogConstants.GuardedLines,
-            ["LIE_INCRIMINATE_LINES"] = DialogConstants.LieIncriminateLines,
-            ["SHOP_LINES"] = DialogConstants.ShopLines,
-            ["ORANGE_BUY_LINES"] = DialogConstants.OrangeBuyLines,
-            ["THEFT_WITNESS_LINES"] = DialogConstants.TheftWitnessLines,
-            ["VICTIM_REACT_LINES"] = DialogConstants.VictimReactLines,
-            ["OPINION_SHARE_LINES_POS"] = DialogConstants.OpinionShareLinesPos,
-            ["OPINION_SHARE_LINES_NEG"] = DialogConstants.OpinionShareLinesNeg,
-            ["DAWN_THOUGHTS_INNOCENT"] = DialogConstants.DawnThoughtsInnocent,
-            ["DAWN_THOUGHTS_MURDERER"] = DialogConstants.DawnThoughtsMurderer,
-            ["PERSUADE_LINES"] = DialogConstants.PersuadeLines,
-            ["RELATION_THOUGHTS"] = DialogConstants.RelationThoughts,
-
             // AppearanceConstants
             ["NAMES"] = AppearanceConstants.Names,
             ["SKIN_TONES"] = AppearanceConstants.SkinTones,

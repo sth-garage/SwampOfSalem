@@ -32,27 +32,43 @@ public class AgentInterop
     [JSInvokable]
     public async Task<string> GetAgentDialog(int alligatorId, string dialogType, int? targetId, string? context)
     {
-        var request = new AgentDialogRequest
+        try
         {
-            AlligatorId = alligatorId,
-            DialogType = dialogType,
-            TargetAlligatorId = targetId,
-            Context = context
-        };
-        var response = await _agents.GenerateDialogAsync(request);
-        return response.Message;
+            var request = new AgentDialogRequest
+            {
+                AlligatorId = alligatorId,
+                DialogType = dialogType,
+                TargetAlligatorId = targetId,
+                Context = context
+            };
+            var response = await _agents.GenerateDialogAsync(request);
+            return response.Message;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"GetAgentDialog failed for {alligatorId}: {ex.Message}");
+            return $"*{dialogType}*";
+        }
     }
 
     [JSInvokable]
     public async Task<string> GetAgentThought(int alligatorId)
     {
-        var request = new AgentDialogRequest
+        try
         {
-            AlligatorId = alligatorId,
-            DialogType = "thought"
-        };
-        var response = await _agents.GenerateDialogAsync(request);
-        return response.Message;
+            var request = new AgentDialogRequest
+            {
+                AlligatorId = alligatorId,
+                DialogType = "thought"
+            };
+            var response = await _agents.GenerateDialogAsync(request);
+            return response.Message;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"GetAgentThought failed for {alligatorId}: {ex.Message}");
+            return "*thinking*";
+        }
     }
 
     [JSInvokable]

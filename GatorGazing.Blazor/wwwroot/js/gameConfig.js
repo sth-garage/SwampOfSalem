@@ -57,28 +57,6 @@ export const WALK_SPEED             = G.WALK_SPEED;
 export const ORANGE_LOVER_CHANCE    = G.ORANGE_LOVER_CHANCE;
 export const MEMORY_STRENGTH        = G.MEMORY_STRENGTH;
 
-// ── Dialog / phrase banks ─────────────────────────────────────
-export const DIALOGUE               = G.DIALOGUE;
-export const INVITE_LINES           = G.INVITE_LINES;
-export const THOUGHTS               = G.THOUGHTS;
-export const MURDERER_BLUFF         = G.MURDERER_BLUFF;
-export const ACCUSE_LINES           = G.ACCUSE_LINES;
-export const DEFEND_LINES           = G.DEFEND_LINES;
-export const MOURN_LINES            = G.MOURN_LINES;
-export const DEBATE_ARGUMENT_LINES  = G.DEBATE_ARGUMENT_LINES;
-export const GUARDED_LINES          = G.GUARDED_LINES;
-export const LIE_INCRIMINATE_LINES  = G.LIE_INCRIMINATE_LINES;
-export const SHOP_LINES             = G.SHOP_LINES;
-export const ORANGE_BUY_LINES       = G.ORANGE_BUY_LINES;
-export const THEFT_WITNESS_LINES    = G.THEFT_WITNESS_LINES;
-export const VICTIM_REACT_LINES     = G.VICTIM_REACT_LINES;
-export const OPINION_SHARE_LINES_POS = G.OPINION_SHARE_LINES_POS;
-export const OPINION_SHARE_LINES_NEG = G.OPINION_SHARE_LINES_NEG;
-export const DAWN_THOUGHTS_INNOCENT  = G.DAWN_THOUGHTS_INNOCENT;
-export const DAWN_THOUGHTS_MURDERER  = G.DAWN_THOUGHTS_MURDERER;
-export const PERSUADE_LINES         = G.PERSUADE_LINES;
-export const RELATION_THOUGHTS      = G.RELATION_THOUGHTS;
-
 // ── Appearance ────────────────────────────────────────────────
 export const NAMES          = G.NAMES;
 export const SKIN_TONES     = G.SKIN_TONES;

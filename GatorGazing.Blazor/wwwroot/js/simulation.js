@@ -1,18 +1,16 @@
 import {
     PERSON_SIZE, PHASE, TICK_MS, TALK_DIST, TALK_STOP,
     SOCIAL_DECAY, SOCIAL_GAIN, SOCIAL_MAX, HOME_WARN_TICKS,
-    VOTE_DISPLAY_TICKS, MURDERER_BLUFF, ACCUSE_LINES, DEFEND_LINES,
-    PERSUADE_LINES, CONVICTION_THRESHOLD, PEOPLE_COUNT,
+    VOTE_DISPLAY_TICKS,
+    CONVICTION_THRESHOLD, PEOPLE_COUNT,
     PERSONALITY_EMOJI, MAX_DEBATE_SPEAKERS, DEBATE_SPEAK_COOLDOWN,
-    SHOP_LINES, ORANGE_BUY_LINES, OPINION_SHARE_LINES_POS, OPINION_SHARE_LINES_NEG,
-    OBSERVE_SHOP_RADIUS, ORANGE_PRICE, APPLE_PRICE,
-    GUARDED_LINES, LIE_INCRIMINATE_LINES, DEBATE_ARGUMENT_LINES
+    OBSERVE_SHOP_RADIUS, ORANGE_PRICE, APPLE_PRICE
 } from './gameConfig.js';
 import {
     rnd, rndF, rndTicks, pickMessage, pickInvite, pickThought,
     pickRelationThought, stageBounds, dist, weightedPick,
     buildFigureSVG, culdesacLayout, buildCuldesacSVG, socialColor,
-    thoughtDelayMs, speakDelayMs, pickBucketed
+    thoughtDelayMs, speakDelayMs
 } from './helpers.js';
 import {
     createPerson, initRelations, driftRelations, socialWeights, living
@@ -46,7 +44,7 @@ function _maybeShareOpinion(speaker, listener) {
         if (Math.random() < 0.5) {
             // Guarded response
             const ctx = `You are talking to ${listener.name} but you dislike them. Be evasive.`;
-            requestDialog(speaker, 'guarded', pickBucketed(GUARDED_LINES, speaker.personality), listener.id, ctx);
+            requestDialog(speaker, 'guarded', '...', listener.id, ctx);
             speaker.nextSpeakAt = Date.now() + 2500;
             speaker.history.push({ day: state.dayNumber, type: 'guarded', with: listener.id, detail: `Was guarded talking to ${listener.name}` });
             return;
@@ -57,8 +55,7 @@ function _maybeShareOpinion(speaker, listener) {
             if (enemies.length > 0 && victims.length > 0) {
                 const target = enemies[rnd(enemies.length)];
                 const victim = victims[rnd(victims.length)];
-                const line = pickBucketed(LIE_INCRIMINATE_LINES, speaker.personality)
-                    .replace('{target}', target.name).replace('{victim}', victim.name);
+                const line = `${target.name} did something to ${victim.name}...`;
                 const ctx = `You are lying to ${listener.name} to frame ${target.name}. Blame ${target.name} for something ${victim.name} experienced.`;
                 requestDialog(speaker, 'opinion', line, listener.id, ctx);
                 speaker.nextSpeakAt = Date.now() + 2500;
@@ -89,8 +86,7 @@ function _maybeShareOpinion(speaker, listener) {
     }
 
     const isPositive = opinion >= 0;
-    const lines = isPositive ? OPINION_SHARE_LINES_POS : OPINION_SHARE_LINES_NEG;
-    const fallback = pickBucketed(lines, speaker.personality).replace('{name}', target.name);
+    const fallback = '...';
     const ctx = `You are sharing your ${isPositive ? 'positive' : 'negative'} opinion about ${target.name} with ${listener.name}.`;
     requestDialog(speaker, 'opinion', fallback, listener.id, ctx);
     speaker.nextSpeakAt = Date.now() + 2500;
@@ -221,7 +217,7 @@ function tick() {
             if (canSpeak && Math.random() < 0.3) {
                 const partner = person.talkingTo !== null ? state.people.find(q => q.id === person.talkingTo) : null;
                 const ctx = partner ? `You are casually talking to ${partner.name}. Deflect suspicion subtly.` : null;
-                requestDialog(person, 'bluff', pickBucketed(MURDERER_BLUFF, person.personality), partner?.id ?? null, ctx);
+                requestDialog(person, 'bluff', '...', partner?.id ?? null, ctx);
                 person.nextSpeakAt = now + speakDelayMs(person.socialStat);
             }
         } else if ((person.activity === 'talking' || person.activity === 'hosting') && person.ticksLeft > 0) {
@@ -229,7 +225,7 @@ function tick() {
                 const partner = person.talkingTo !== null ? state.people.find(q => q.id === person.talkingTo) : null;
                 if (partner && (person.relations[partner.id] ?? 0) < -40 && Math.random() < 0.4) {
                     const ctx = `You dislike ${partner.name}. They said: "${partner.message || '...'}"`;
-                    requestDialog(person, 'guarded', pickBucketed(GUARDED_LINES, person.personality), partner?.id, ctx);
+                    requestDialog(person, 'guarded', '...', partner?.id, ctx);
                 } else {
                     const ctx = partner ? `You are chatting with ${partner.name}. They said: "${partner.message || '...'}"` : null;
                     requestDialog(person, 'conversation', pickMessage(person.personality), partner?.id ?? null, ctx);
@@ -243,13 +239,13 @@ function tick() {
                     const recentMessages = living().filter(q => q.message && q.id !== person.id).map(q => `${q.name}: "${q.message}"`).slice(0, 3).join('; ');
                     const ctx = `Debate about the murder. You suspect ${suspect.name}. Recent discussion: ${recentMessages || 'none yet'}`;
                     if (Math.random() < 0.45) {
-                        requestDialog(person, 'debate', pickBucketed(DEBATE_ARGUMENT_LINES, person.personality).replace('{name}', suspect.name), suspect.id, ctx);
+                        requestDialog(person, 'debate', '...', suspect.id, ctx);
                     } else {
-                        requestDialog(person, 'accusation', pickBucketed(ACCUSE_LINES, person.personality).replace('{name}', suspect.name), suspect.id, ctx);
+                        requestDialog(person, 'accusation', '...', suspect.id, ctx);
                     }
                 } else {
                     const ctx = 'Debate about the murder. Others may suspect you. Defend yourself.';
-                    requestDialog(person, 'defense', pickBucketed(DEFEND_LINES, person.personality), null, ctx);
+                    requestDialog(person, 'defense', '...', null, ctx);
                 }
 
                 // Persuasion: high-conviction persons try to convince liked neighbours
@@ -267,7 +263,7 @@ function tick() {
                         listener.conviction = Math.min(100, Math.max(
                             listener.conviction, listener.suspicion[suspect.id]));
                         const ctx = `You are trying to convince ${listener.name} to vote for ${suspect.name}. ${listener.name} ${liking > 50 ? 'trusts you' : 'is neutral toward you'}.`;
-                        requestDialog(person, 'persuade', pickBucketed(PERSUADE_LINES, person.personality).replace('{name}', suspect.name), suspect.id, ctx);
+                        requestDialog(person, 'persuade', '...', suspect.id, ctx);
                         person.history.push({ day: state.dayNumber, type: 'persuaded', target: listener.id, about: suspect.id, detail: `Tried to convince ${listener.name} that ${suspect.name} is guilty` });
                     }
                 }
@@ -361,7 +357,7 @@ function tick() {
             const boughtApples  = !person.orangeLover || boughtOranges === 0
                 ? buyFruit(person, 'apple') : 0;
             if (boughtOranges > 0) {
-                requestDialog(person, 'conversation', pickBucketed(ORANGE_BUY_LINES, person.personality), null, 'You just bought swordfish at the fish market! Express your excitement.');
+                requestDialog(person, 'conversation', '...', null, 'You just bought swordfish at the fish market! Express your excitement.');
                 person.nextSpeakAt = Date.now() + 2000;
                 // Nearby people observe the orange purchase
                 for (const obs of living()) {
@@ -372,7 +368,7 @@ function tick() {
                     }
                 }
             } else if (boughtApples > 0) {
-                requestDialog(person, 'conversation', pickBucketed(SHOP_LINES, person.personality), null, 'You just bought catfish at the fish market.');
+                requestDialog(person, 'conversation', '...', null, 'You just bought catfish at the fish market.');
                 person.nextSpeakAt = Date.now() + 1500;
             }
             person.indoors  = false;

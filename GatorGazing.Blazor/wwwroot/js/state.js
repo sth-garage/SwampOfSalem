@@ -1,4 +1,4 @@
-from './gameConfig.js';
+import { PHASE, DAY_TICKS } from './gameConfig.js';
 
 // ── Shared mutable state ──────────────────────────────────────
 // Gathered into a single object so all modules can import & mutate it.

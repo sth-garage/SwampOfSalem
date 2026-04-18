@@ -59,6 +59,9 @@ export function requestDialog(person, dialogType, fallback, targetId = null, con
             if (response && response.length > 0 && response.length <= 200) {
                 person.message = response;
             }
+        })
+        .catch(err => {
+            console.error(`Agent dialog failed for ${person.name}:`, err);
         });
     trackRequest(person.id, 'dialog', promise);
 }
@@ -79,6 +82,9 @@ export function requestThought(person, fallback) {
             if (response && response.length > 0 && response.length <= 150) {
                 person.thought = response;
             }
+        })
+        .catch(err => {
+            console.error(`Agent thought failed for ${person.name}:`, err);
         });
     trackRequest(person.id, 'thought', promise);
 }

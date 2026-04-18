@@ -1,12 +1,11 @@
 import {
     PERSON_SIZE, PHASE, DAY_TICKS, NIGHT_TICKS, DAWN_TICKS, DEBATE_TICKS,
-    VOTE_DISPLAY_TICKS, MOURN_LINES, DAWN_THOUGHTS_INNOCENT,
-    DAWN_THOUGHTS_MURDERER, ACCUSE_LINES, DEFEND_LINES,
-    MURDERER_BLUFF, MEMORY_STRENGTH, MAX_DEBATE_SPEAKERS,
-    DEBATE_SPEAK_COOLDOWN, VICTIM_REACT_LINES, THEFT_WITNESS_LINES,
-    ORANGE_PRICE, DEBATE_ARGUMENT_LINES
+    VOTE_DISPLAY_TICKS,
+    MEMORY_STRENGTH, MAX_DEBATE_SPEAKERS,
+    DEBATE_SPEAK_COOLDOWN,
+    ORANGE_PRICE
 } from './gameConfig.js';
-import { rnd, rndF, pickThought, thoughtDelayMs, speakDelayMs, pickBucketed } from './helpers.js';
+import { rnd, rndF, thoughtDelayMs, speakDelayMs } from './helpers.js';
 import { living } from './people.js';
 import { state } from './state.js';
 import { renderAllPeople, updateStats, updatePhaseLabel, updateHouseGuests, showDeadBody } from './rendering.js';
@@ -109,7 +108,7 @@ export function triggerDawn() {
     // Victim reactions: outrage + suspicion based on observed spending
     for (const victim of living().filter(p => p.stolenFrom)) {
         const victimCtx = `You discovered someone stole money from you during the night! You are outraged.`;
-        requestDialog(victim, 'mourn', pickBucketed(VICTIM_REACT_LINES, victim.personality), null, victimCtx);
+        requestDialog(victim, 'mourn', '...', null, victimCtx);
         victim.nextThoughtAt = Date.now() + 4000;
         // Suspect those seen buying many oranges, weighted by dislike
         for (const q of living()) {
@@ -129,7 +128,7 @@ export function triggerDawn() {
     // Witnesses react
     for (const witness of living().filter(p => p.witnessedThefts.length > 0 &&
             p.witnessedThefts.some(t => t.day === state.dayNumber))) {
-        requestDialog(witness, 'mourn', pickBucketed(THEFT_WITNESS_LINES, witness.personality), null, 'You witnessed a theft during the night.');
+        requestDialog(witness, 'mourn', '...', null, 'You witnessed a theft during the night.');
     }
 
     for (const p of living()) {
@@ -139,10 +138,7 @@ export function triggerDawn() {
         p.ticksLeft = 2 + rnd(3);
         p.x = h.doorX + rndF(16) - 8;
         p.y = h.doorY + rndF(16) - 8;
-        const isMurderer = p.id === state.murdererId;
-        const thoughtFallback = isMurderer
-            ? pickBucketed(DAWN_THOUGHTS_MURDERER, p.personality)
-            : pickBucketed(DAWN_THOUGHTS_INNOCENT, p.personality);
+        const thoughtFallback = '...';
         const thoughtCtx = isMurderer
             ? 'It is dawn. Someone was murdered last night — by you. Think something secretly satisfied.'
             : 'It is dawn. Someone was murdered last night. Think about how you feel.';
@@ -151,7 +147,7 @@ export function triggerDawn() {
         const mournCtx = state.nightVictimId !== null
             ? `${state.people.find(q => q.id === state.nightVictimId)?.name || 'Someone'} was found dead this morning.`
             : 'Another night has passed in the swamp.';
-        requestDialog(p, 'mourn', pickBucketed(MOURN_LINES, p.personality), null, mournCtx);
+        requestDialog(p, 'mourn', '...', null, mournCtx);
         recordMemory(p.id, state.dayNumber, 'dawn', mournCtx, state.nightVictimId);
     }
     updateHouseGuests();
@@ -205,18 +201,12 @@ export function triggerDebate() {
         if (i < MAX_DEBATE_SPEAKERS) {
             // First speakers say something immediately
             const suspect = pickDebateSuspect(p);
-            let fallback;
+            let fallback = '...';
             if (suspect) {
-                if (Math.random() < 0.5) {
-                    fallback = pickBucketed(DEBATE_ARGUMENT_LINES, p.personality).replace('{name}', suspect.name);
-                } else {
-                    fallback = pickBucketed(ACCUSE_LINES, p.personality).replace('{name}', suspect.name);
-                }
                 const ctx = `Debate is starting. You suspect ${suspect.name}. Make your opening accusation.`;
                 requestDialog(p, 'accusation', fallback, suspect.id, ctx);
                 p.history.push({ day: state.dayNumber, type: 'debate_accused', target: suspect.id, detail: `Accused ${suspect.name} during debate` });
             } else {
-                fallback = pickBucketed(DEFEND_LINES, p.personality);
                 const ctx = 'Debate is starting. Others may suspect you. Defend yourself.';
                 requestDialog(p, 'defense', fallback, null, ctx);
                 p.history.push({ day: state.dayNumber, type: 'debate_defended', detail: `Defended self during debate` });
@@ -419,9 +409,9 @@ export function triggerExecute() {
             if (p.id === state.condemnedId) continue;
             const reactCtx = `${condemned.name} is being walked to the centre to be executed. You are watching.`;
             if (p.id === state.murdererId) {
-                requestDialog(p, 'execute_react', pickBucketed(MURDERER_BLUFF, p.personality), condemned.id, reactCtx + ' You are the real murderer — act relieved or deflect.');
+                requestDialog(p, 'execute_react', '...', condemned.id, reactCtx + ' You are the real murderer — act relieved or deflect.');
             } else {
-                requestDialog(p, 'execute_react', pickBucketed(MOURN_LINES, p.personality), condemned.id, reactCtx);
+                requestDialog(p, 'execute_react', '...', condemned.id, reactCtx);
             }
             recordMemory(p.id, state.dayNumber, 'execution', `Watched ${condemned.name} be executed`, condemned.id);
         }
@@ -494,8 +484,8 @@ export function finaliseExecution() {
         p.y = h.doorY + rndF(20) - 10;
         p.targetX = h.doorX + rndF(80) - 40;
         p.targetY = h.doorY + rndF(80) - 40;
-        p.thought = pickThought(p.personality);
-        requestThought(p, pickThought(p.personality));
+        p.thought = '...';
+        requestThought(p, '...');
         p.nextThoughtAt = Date.now() + thoughtDelayMs(p.thoughtStat);
     }
     renderAllPeople();

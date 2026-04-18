@@ -1,6 +1,6 @@
 import {
     PERSON_SIZE, PEOPLE_COUNT, PERSONALITIES, ACTIVITY_TICKS, WALK_SPEED,
-    SOCIAL_START, DIALOGUE, INVITE_LINES, THOUGHTS, RELATION_THOUGHTS,
+    SOCIAL_START,
     SKIN_TONES, HAT_STYLES, SHIRT_COLORS, HOUSE_COLORS, NAMES,
     PERSONALITY_EMOJI
 } from './gameConfig.js';
@@ -11,9 +11,9 @@ export const rndF = n => Math.random() * n;
 export const hsl  = () => `hsl(${rnd(360)},${55+rnd(30)}%,${45+rnd(20)}%)`;
 export const rndTicks = a => { const [mn,mx] = ACTIVITY_TICKS[a]; return mn + rnd(mx-mn+1); };
 
-export const pickMessage = p => { const d = DIALOGUE[p]; return d[rnd(d.length)]; };
-export const pickInvite  = ()  => INVITE_LINES[rnd(INVITE_LINES.length)];
-export const pickThought = p => { const t = THOUGHTS[p]; return t[rnd(t.length)]; };
+export const pickMessage = p => '...';
+export const pickInvite  = () => '...';
+export const pickThought = p => '...';
 
 // Pick from a personality-bucketed object: { cheerful:[...], grumpy:[...], ... }
 export function pickBucketed(bucket, personality) {
@@ -212,8 +212,7 @@ export function relationTier(val) {
 }
 
 export function pickRelationThought(val) {
-    const pool = RELATION_THOUGHTS[relationTier(val)];
-    return pool[rnd(pool.length)];
+    return '...';
 }
 
 export function relationColor(avgVal) {

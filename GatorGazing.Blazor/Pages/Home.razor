@@ -1,10 +1,77 @@
 ﻿@page "/"
+@using Microsoft.SemanticKernel
+@using Microsoft.SemanticKernel.ChatCompletion
 @inject IJSRuntime JS
 @inject GatorGazing.SK.Agents.GatorAgentService AgentService
 @inject IConfiguration Configuration
+@inject Kernel Kernel
 @implements IAsyncDisposable
 
 <PageTitle>Swamp of Salem</PageTitle>
+
+@if (!_started)
+{
+    <div class="splash-overlay">
+        <div class="splash-card">
+            <h1>🐊 Swamp of Salem</h1>
+
+            @if (!_testMode)
+            {
+                <p class="splash-subtitle">A murder-mystery simulation powered by AI agents</p>
+                <div class="splash-buttons">
+                    <button class="btn-primary" @onclick="StartGame">▶ Start Game</button>
+                    <button class="btn-secondary" @onclick="EnterTestMode">🔌 Test AI Connection</button>
+                </div>
+            }
+            else
+            {
+                <div class="ai-test-panel">
+                    <h2>🔌 AI Connection Test</h2>
+                    <p class="test-config">
+                        Provider: <strong>@(_llmProvider)</strong> &mdash;
+                        @if (_llmProvider.Equals("AzureOpenAI", StringComparison.OrdinalIgnoreCase))
+                        {
+                            <span>Deployment: <strong>@(Configuration["LLM:AzureOpenAI:DeploymentName"] ?? "gpt-4o")</strong></span>
+                        }
+                        else
+                        {
+                            <span>Model: <strong>@(Configuration["LLM:OpenAI:ModelId"] ?? "llama3")</strong>,
+                            Endpoint: <strong>@(Configuration["LLM:OpenAI:Endpoint"] ?? "http://localhost:11434/v1")</strong></span>
+                        }
+                    </p>
+                    <div class="test-chat">
+                        @foreach (var msg in _chatMessages)
+                        {
+                            <div class="test-msg @(msg.IsUser ? "test-msg-user" : "test-msg-ai")">
+                                <span class="test-role">@(msg.IsUser ? "You" : "AI")</span>
+                                <span class="test-text">@msg.Text</span>
+                            </div>
+                        }
+                        @if (_aiThinking)
+                        {
+                            <div class="test-msg test-msg-ai">
+                                <span class="test-role">AI</span>
+                                <span class="test-text thinking">Thinking…</span>
+                            </div>
+                        }
+                    </div>
+                    <div class="test-input-row">
+                        <input @bind="_userMessage" @bind:event="oninput"
+                               @onkeydown="HandleTestKeyDown"
+                               placeholder="Type a message…"
+                               disabled="@_aiThinking" />
+                        <button @onclick="SendTestMessage" disabled="@(_aiThinking || string.IsNullOrWhiteSpace(_userMessage))">Send</button>
+                    </div>
+                    @if (!string.IsNullOrEmpty(_testError))
+                    {
+                        <div class="test-error">⚠ @_testError</div>
+                    }
+                    <button class="btn-back" @onclick="ExitTestMode">← Back</button>
+                </div>
+            }
+        </div>
+    </div>
+}
 
 <div id="header">
     <h1>🐊 Swamp of Salem</h1>
@@ -38,23 +105,105 @@
     private IJSObjectReference? _module;
     private DotNetObjectReference<GatorGazing.Blazor.Interop.AgentInterop>? _interopRef;
 
+    private bool _started;
+    private bool _testMode;
+    private bool _aiThinking;
+    private string _userMessage = "";
+    private string _testError = "";
+    private string _llmProvider = "";
+    private readonly List<ChatMsg> _chatMessages = [];
+
+    private record ChatMsg(bool IsUser, string Text);
+
+    protected override void OnInitialized()
+    {
+        _llmProvider = Configuration["LLM:Provider"] ?? "OpenAI";
+    }
+
+    private async Task StartGame()
+    {
+        _started = true;
+        StateHasChanged();
+        // Wait a frame for the DOM to update before initializing JS
+        await Task.Yield();
+        await InitializeGame();
+    }
+
+    private void EnterTestMode()
+    {
+        _testMode = true;
+        _testError = "";
+        _chatMessages.Clear();
+        _chatMessages.Add(new(false, "Hello! I'm using the configured LLM. Send me a message to test the connection."));
+    }
+
+    private void ExitTestMode()
+    {
+        _testMode = false;
+    }
+
+    private async Task HandleTestKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_aiThinking && !string.IsNullOrWhiteSpace(_userMessage))
+            await SendTestMessage();
+    }
+
+    private async Task SendTestMessage()
+    {
+        if (string.IsNullOrWhiteSpace(_userMessage) || _aiThinking) return;
+
+        var msg = _userMessage.Trim();
+        _userMessage = "";
+        _testError = "";
+        _chatMessages.Add(new(true, msg));
+        _aiThinking = true;
+        StateHasChanged();
+
+        try
+        {
+            var chatService = Kernel.GetRequiredService<IChatCompletionService>();
+            var history = new ChatHistory(
+                "You are a friendly alligator named Gus who lives in a swamp. Keep responses brief (1-2 sentences).");
+            // Add previous messages for context
+            foreach (var m in _chatMessages)
+            {
+                if (m.IsUser)
+                    history.AddUserMessage(m.Text);
+                else
+                    history.AddAssistantMessage(m.Text);
+            }
+            var result = await chatService.GetChatMessageContentAsync(history);
+            _chatMessages.Add(new(false, result.Content ?? "(empty response)"));
+        }
+        catch (Exception ex)
+        {
+            _testError = ex.Message;
+            _chatMessages.Add(new(false, "❌ Connection failed — see error below."));
+        }
+        finally
+        {
+            _aiThinking = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task InitializeGame()
+    {
+        var interop = new GatorGazing.Blazor.Interop.AgentInterop(AgentService);
+        _interopRef = DotNetObjectReference.Create(interop);
+
+        var dialogSource = Configuration["DialogSource"] ?? "AI";
+
+        var configJson = GatorGazing.AppLogic.Services.GameConfigProvider.GetConfigJson();
+        await JS.InvokeVoidAsync("setGameConfig", configJson);
+
+        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/main.js");
+        await _module.InvokeVoidAsync("initSimulation", _interopRef, dialogSource);
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
-        {
-            // Create the interop bridge and pass it to JS so the simulation can call agent methods
-            var interop = new GatorGazing.Blazor.Interop.AgentInterop(AgentService);
-            _interopRef = DotNetObjectReference.Create(interop);
-
-            var dialogSource = Configuration["DialogSource"] ?? "AI";
-
-            // Inject game constants into JS before module import so gameConfig.js can read them
-            var configJson = GatorGazing.AppLogic.Services.GameConfigProvider.GetConfigJson();
-            await JS.InvokeVoidAsync("eval", $"window.GameConfig = {configJson};");
-
-            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/main.js");
-            await _module.InvokeVoidAsync("initSimulation", _interopRef, dialogSource);
-        }
+        // Game initialization is now triggered by StartGame()
     }
 
     public async ValueTask DisposeAsync()
