@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Swamp of Salem</title>
+    <base href="/" />
+    <link rel="stylesheet" href="css/swamp-of-salem.css" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <style>
+        /* Splash screen styles */
+        .splash-overlay {
+            position: fixed; inset: 0; z-index: 200;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(4, 14, 8, 0.97);
+            backdrop-filter: blur(6px);
+        }
+        .splash-card {
+            background: linear-gradient(160deg, #0e2018 0%, #081510 100%);
+            border: 1px solid rgba(80,180,80,.2);
+            border-radius: 18px;
+            padding: 2.8rem 3.4rem;
+            text-align: center;
+            max-width: 480px;
+            box-shadow: 0 12px 60px rgba(0,0,0,.75);
+        }
+        .splash-card h1 { font-size: 2.2rem; color: #a8d890; margin-bottom: .6rem; }
+        .splash-subtitle { color: #8ab880; font-size: 1rem; margin-bottom: 1.5rem; }
+        .splash-buttons { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+        .splash-buttons .btn-primary {
+            padding: .6rem 1.8rem; font-size: 1rem;
+            background: rgba(30,100,28,.85); color: #c8f0a8;
+            border: 1px solid rgba(80,180,60,.4); border-radius: 8px; cursor: pointer;
+        }
+        .splash-buttons .btn-primary:hover { background: rgba(40,120,35,.95); }
+        .splash-buttons .btn-secondary {
+            padding: .6rem 1.8rem; font-size: 1rem;
+            background: rgba(18,45,18,.7); color: #8ab880;
+            border: 1px solid rgba(60,140,60,.3); border-radius: 8px; cursor: pointer;
+        }
+        .splash-buttons .btn-secondary:hover { background: rgba(30,65,28,.85); }
+        /* Test panel */
+        .ai-test-panel { text-align: left; }
+        .ai-test-panel h2 { font-size: 1.2rem; color: #a8d890; margin-bottom: .5rem; }
+        /* Get Gator panel */
+        .gg-status { font-size: .9rem; color: #8ab880; font-style: italic; margin: .5rem 0; }
+        .gg-result { display: flex; flex-direction: column; gap: .6rem; margin-top: .4rem; }
+        .gg-section-label { font-size: .72rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .07em; color: #6a9860; margin-bottom: -.3rem; }
+        .gg-narrative { font-size: .88rem; color: #c8e0a8; line-height: 1.6;
+            background: rgba(20,50,15,.5); border-radius: 6px; padding: .6rem .8rem; }
+        .gg-json { font-size: .76rem; color: #a8c890; background: rgba(10,25,8,.7);
+            border: 1px solid rgba(60,120,40,.25); border-radius: 6px;
+            padding: .6rem .8rem; max-height: 280px; overflow-y: auto;
+            white-space: pre-wrap; word-break: break-all; margin: 0; }
+        .gg-regenerate { margin-top: .2rem; align-self: flex-start; }
+        .test-config { font-size: .85rem; color: #8ab880; margin-bottom: .8rem; }
+        .test-chat { max-height: 220px; overflow-y: auto; margin-bottom: .8rem; display: flex; flex-direction: column; gap: .4rem; }
+        .test-msg { padding: .3rem .6rem; border-radius: 6px; font-size: .85rem; }
+        .test-msg-user { background: rgba(30,80,30,.5); color: #c8e8b0; align-self: flex-end; }
+        .test-msg-ai { background: rgba(20,50,20,.6); color: #a8d890; align-self: flex-start; }
+        .test-role { font-weight: 700; margin-right: .4rem; font-size: .75rem; }
+        .test-text { }
+        .thinking { opacity: .6; font-style: italic; }
+        .test-input-row { display: flex; gap: .5rem; margin-bottom: .5rem; }
+        .test-input-row input {
+            flex: 1; padding: .4rem .7rem; border-radius: 6px;
+            border: 1px solid rgba(60,140,60,.3); background: rgba(10,30,10,.8); color: #b8d8a8;
+            font-size: .85rem;
+        }
+        .test-input-row button { padding: .4rem 1rem; }
+        .test-error { color: #ff8860; font-size: .8rem; margin-bottom: .5rem; }
+        .btn-back {
+            padding: .4rem 1.2rem; font-size: .88rem; margin-top: .5rem;
+            background: rgba(18,45,18,.7); color: #8ab880;
+            border: 1px solid rgba(60,140,60,.3); border-radius: 6px; cursor: pointer;
+        }
+        .btn-back:hover { background: rgba(30,65,28,.85); }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <!-- Splash screen -->
+        <div class="splash-overlay" id="splash">
+            <div class="splash-card">
+                <h1>🐊 Swamp of Salem</h1>
+                <div id="splash-main">
+                    <p class="splash-subtitle">A murder-mystery simulation powered by AI agents</p>
+                    <div class="splash-buttons">
+                        <button class="btn-primary" id="startGameBtn">▶ Start Game</button>
+                        <button class="btn-secondary" id="testAiBtn">🔌 Test AI Connection</button>
+                        <button class="btn-secondary" id="getGatorBtn">🐊 Get Gator</button>
+                    </div>
+                </div>
+                <div id="splash-test" style="display:none">
+                    <div class="ai-test-panel">
+                        <h2>🔌 AI Connection Test</h2>
+                        <p class="test-config" id="test-config-info">Loading config...</p>
+                        <div class="test-chat" id="test-chat"></div>
+                        <div class="test-input-row">
+                            <input id="test-input" placeholder="Type a message…" />
+                            <button id="test-send-btn">Send</button>
+                        </div>
+                        <div class="test-error" id="test-error" style="display:none"></div>
+                        <button class="btn-back" id="test-back-btn">← Back</button>
+                    </div>
+                </div>
+                <div id="splash-gator" style="display:none">
+                    <div class="ai-test-panel gg-panel">
+                        <h2>🐊 Get Gator</h2>
+                        <p class="test-config">Ask the AI to invent a randomized alligator character.</p>
+                        <div id="gg-status" class="gg-status" style="display:none">Generating…</div>
+                        <div id="gg-result" class="gg-result" style="display:none">
+                            <div class="gg-section-label">📝 Narrative</div>
+                            <div id="gg-narrative" class="gg-narrative"></div>
+                            <div class="gg-section-label">📋 JSON Object</div>
+                            <pre id="gg-json" class="gg-json"></pre>
+                            <button class="btn-secondary gg-regenerate" id="gg-regenerate-btn">🔄 Generate Another</button>
+                        </div>
+                        <div class="test-error" id="gg-error" style="display:none"></div>
+                        <button class="btn-back" id="gg-back-btn">← Back</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="header">
+            <h1>🐊 Swamp of Salem</h1>
+            <div class="controls">
+                <button id="respawnBtn">↺ Respawn</button>
+                <button id="pauseBtn" class="secondary">⏸ Pause</button>
+                <button id="dialogModeBtn" class="secondary" title="Toggle between AI Agent dialog and local JS dialog">🤖 AI</button>
+            </div>
+            <div id="stats"></div>
+            <div id="nightfall-timer" class="nightfall-timer"></div>
+            <div id="phase-label" class="phase-label"></div>
+        </div>
+
+        <div id="world">
+            <svg id="connections"></svg>
+            <div id="night-overlay"></div>
+            <div id="vote-tally" style="display:none"></div>
+            <div id="game-over-overlay" style="display:none">
+                <div class="go-card">
+                    <div class="go-title"></div>
+                    <div class="go-body"></div>
+                    <button id="goRestartBtn">↺ Play Again</button>
+                </div>
+            </div>
+            <aside id="gator-panel" class="gator-panel" style="display:none">
+                <button class="panel-close" id="panelCloseBtn" title="Close">✕</button>
+                <div id="gator-panel-content"></div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- Night Report Overlay -->
+    <div id="night-report-overlay" class="nr-overlay" style="display:none">
+        <div class="nr-panel">
+            <div class="nr-header">
+                <span class="nr-title">🌙 Night Falls</span>
+                <span class="nr-subtitle">Click a gator to inspect their thoughts &amp; suspicions</span>
+            </div>
+            <div class="nr-body">
+                <div id="nr-gator-list" class="nr-gator-list"></div>
+                <div id="nr-detail" class="nr-detail" style="display:none"></div>
+            </div>
+            <div class="nr-footer">
+                <button id="nr-continue-btn" class="nr-continue-btn">☀️ Continue to Morning</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Call Modal -->
+    <div id="ai-modal" class="ai-modal-overlay" style="display:none">
+        <div class="ai-modal-card">
+            <div class="ai-modal-title" id="ai-modal-title">🤖 Asking AI…</div>
+            <div class="ai-modal-speaker" id="ai-modal-speaker"></div>
+            <div class="ai-modal-status" id="ai-modal-status">Waiting for response…</div>
+            <div class="ai-modal-result" id="ai-modal-result" style="display:none"></div>
+            <div class="ai-modal-thought" id="ai-modal-thought" style="display:none"></div>
+            <button class="ai-modal-ok" id="ai-modal-ok" style="display:none">🔊 OK — Say it aloud</button>
+        </div>
+    </div>
+
+    <script type="module">
+        const chatMessages = [];
+        let configData = null;
+
+        // Fetch config for test panel
+        fetch('/api/config').then(r => r.json()).then(data => {
+            configData = data;
+            const info = document.getElementById('test-config-info');
+            if (data.provider === 'AzureOpenAI') {
+                info.innerHTML = `Provider: <strong>${data.provider}</strong> — Deployment: <strong>${data.model}</strong>`;
+            } else {
+                info.innerHTML = `Provider: <strong>${data.provider}</strong> — Model: <strong>${data.model}</strong>, Endpoint: <strong>${data.endpoint}</strong>`;
+            }
+        });
+
+        // Start game button
+        document.getElementById('startGameBtn').addEventListener('click', async () => {
+            // Load game config from server and set on window BEFORE importing any JS modules
+            const cfgResp = await fetch('/api/game-config');
+            window.GameConfig = await cfgResp.json();
+
+            document.getElementById('splash').style.display = 'none';
+            const dialogSource = configData?.dialogSource ?? 'AI';
+
+            // Dynamic import so gameConfig.js is not evaluated until window.GameConfig is ready
+            const { initSimulation } = await import('./js/main.js?v=2');
+            initSimulation(null, dialogSource);
+        });
+
+        // Test AI button
+        document.getElementById('testAiBtn').addEventListener('click', () => {
+            document.getElementById('splash-main').style.display = 'none';
+            document.getElementById('splash-test').style.display = 'block';
+            chatMessages.length = 0;
+            document.getElementById('test-chat').innerHTML = '';
+            addTestMsg(false, "Hello! I'm using the configured LLM. Send me a message to test the connection.");
+        });
+
+        document.getElementById('test-back-btn').addEventListener('click', () => {
+            document.getElementById('splash-test').style.display = 'none';
+            document.getElementById('splash-main').style.display = 'block';
+        });
+
+        // Get Gator button
+        document.getElementById('getGatorBtn').addEventListener('click', () => {
+            document.getElementById('splash-main').style.display = 'none';
+            document.getElementById('splash-gator').style.display = 'block';
+            generateGator();
+        });
+
+        document.getElementById('gg-back-btn').addEventListener('click', () => {
+            document.getElementById('splash-gator').style.display = 'none';
+            document.getElementById('splash-main').style.display = 'block';
+        });
+
+        document.getElementById('gg-regenerate-btn').addEventListener('click', generateGator);
+
+        async function generateGator() {
+            const statusEl    = document.getElementById('gg-status');
+            const resultEl    = document.getElementById('gg-result');
+            const narrativeEl = document.getElementById('gg-narrative');
+            const jsonEl      = document.getElementById('gg-json');
+            const errorEl     = document.getElementById('gg-error');
+
+            statusEl.style.display  = 'block';
+            resultEl.style.display  = 'none';
+            errorEl.style.display   = 'none';
+
+            try {
+                const resp = await fetch('/api/agent/get-gator', { method: 'POST' });
+                const data = await resp.json();
+
+                if (data.narrative && data.narrative.startsWith('❌')) {
+                    errorEl.textContent    = data.narrative;
+                    errorEl.style.display  = 'block';
+                    statusEl.style.display = 'none';
+                    return;
+                }
+
+                narrativeEl.textContent = data.narrative;
+
+                // Pretty-print JSON
+                try {
+                    const parsed = JSON.parse(data.json);
+                    jsonEl.textContent = JSON.stringify(parsed, null, 2);
+                } catch {
+                    jsonEl.textContent = data.json;
+                }
+
+                statusEl.style.display = 'none';
+                resultEl.style.display = 'flex';
+            } catch (err) {
+                errorEl.textContent    = '⚠ ' + err.message;
+                errorEl.style.display  = 'block';
+                statusEl.style.display = 'none';
+            }
+        }
+
+        document.getElementById('test-send-btn').addEventListener('click', sendTestMessage);
+        document.getElementById('test-input').addEventListener('keydown', e => {
+            if (e.key === 'Enter') sendTestMessage();
+        });
+
+        function addTestMsg(isUser, text) {
+            chatMessages.push({ isUser, text });
+            const div = document.createElement('div');
+            div.className = `test-msg ${isUser ? 'test-msg-user' : 'test-msg-ai'}`;
+            div.innerHTML = `<span class="test-role">${isUser ? 'You' : 'AI'}</span><span class="test-text">${escapeHtml(text)}</span>`;
+            document.getElementById('test-chat').appendChild(div);
+            div.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function escapeHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        async function sendTestMessage() {
+            const input = document.getElementById('test-input');
+            const msg = input.value.trim();
+            if (!msg) return;
+            input.value = '';
+            document.getElementById('test-error').style.display = 'none';
+            addTestMsg(true, msg);
+
+            // Show thinking
+            const thinkDiv = document.createElement('div');
+            thinkDiv.className = 'test-msg test-msg-ai';
+            thinkDiv.innerHTML = '<span class="test-role">AI</span><span class="test-text thinking">Thinking…</span>';
+            document.getElementById('test-chat').appendChild(thinkDiv);
+
+            try {
+                const resp = await fetch('/api/agent/test-chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ messages: chatMessages })
+                });
+                const data = await resp.json();
+                thinkDiv.remove();
+                if (data.error) {
+                    document.getElementById('test-error').textContent = '⚠ ' + data.error;
+                    document.getElementById('test-error').style.display = 'block';
+                    addTestMsg(false, '❌ Connection failed — see error below.');
+                } else {
+                    addTestMsg(false, data.message);
+                }
+            } catch (err) {
+                thinkDiv.remove();
+                document.getElementById('test-error').textContent = '⚠ ' + err.message;
+                document.getElementById('test-error').style.display = 'block';
+                addTestMsg(false, '❌ Connection failed — see error below.');
+            }
+        }
+    </script>
+</body>
+
+</html>

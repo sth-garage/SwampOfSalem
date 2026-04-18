@@ -363,3 +363,5 @@ MigrationBackup/
 FodyWeavers.xsd
 # Client-side app settings (contains local LLM keys/config)
 **/wwwroot/appsettings.json
+appsettings.json
+appsettings.*.json

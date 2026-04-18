@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>GatorGazing – Copilot Chat Session</title>
+<title>SwampOfSalem â€“ Copilot Chat Session</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -75,18 +75,18 @@
 </head>
 <body>
 
-<h1>👥 PeopleWatcher – Copilot Chat Session</h1>
-<p class="meta">Project: <code>PeopleWatcher.Blazor</code> · .NET 10 · Blazor WebAssembly · Generated summary</p>
+<h1>ðŸ‘¥ PeopleWatcher â€“ Copilot Chat Session</h1>
+<p class="meta">Project: <code>PeopleWatcher.Blazor</code> Â· .NET 10 Â· Blazor WebAssembly Â· Generated summary</p>
 
 <hr>
 
-<!-- ═══════════════════════════════════════════════ TURN 1 ═══ -->
-<h2>Issue 1 — "An unhandled error has occurred. Reload 🗙" · No squares on page</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 1 â•â•â• -->
+<h2>Issue 1 â€” "An unhandled error has occurred. Reload ðŸ—™" Â· No squares on page</h2>
 
 <div class="turn">
   <div class="turn-user">
     <div class="role role-user">User</div>
-    I'm seeing an "An unhandled error has occurred. Reload 🗙" but there are no errors in the console.
+    I'm seeing an "An unhandled error has occurred. Reload ðŸ—™" but there are no errors in the console.
     There are no squares on the page.
   </div>
 </div>
@@ -94,28 +94,28 @@
 <div class="turn">
   <div class="turn-assistant">
     <div class="role role-copilot">GitHub Copilot</div>
-    <p>Two root causes identified — both CSS-only, no runtime .NET exceptions.</p>
+    <p>Two root causes identified â€” both CSS-only, no runtime .NET exceptions.</p>
 
-    <h3 class="bug">Bug 1 — Error banner always visible</h3>
+    <h3 class="bug">Bug 1 â€” Error banner always visible</h3>
     <p>
       Blazor's <code>#blazor-error-ui</code> div is always present in the DOM.
-      Blazor JS only sets <code>display:block</code> on it when a real error occurs —
+      Blazor JS only sets <code>display:block</code> on it when a real error occurs â€”
       it relies on CSS to keep it hidden at startup.
       <code>app.css</code> (which normally contains <code>#blazor-error-ui { display: none }</code>)
       was never linked in <code>index.html</code>; only <code>people-watcher.css</code> was linked.
     </p>
 
-    <h3 class="bug">Bug 2 — Person squares invisible (zero-height world)</h3>
+    <h3 class="bug">Bug 2 â€” Person squares invisible (zero-height world)</h3>
     <p>
       The flex layout chain was broken:
-      <code>body</code> (flex column, 100% height) → <code>#app</code> → <code>#world { flex:1 }</code>.
+      <code>body</code> (flex column, 100% height) â†’ <code>#app</code> â†’ <code>#world { flex:1 }</code>.
       <code>#app</code> had no flex styles, so <code>#world</code> collapsed to
       <code>clientHeight = 0</code>. <code>stageBounds()</code> returned
       <code>{ W: -80, H: -80 }</code> and <code>overflow:hidden</code> clipped every person element.
     </p>
 
-    <h3 class="fix">Fix — added to <code>people-watcher.css</code></h3>
-    <pre>/* Blazor app root — must be a flex column so #world can flex-grow */
+    <h3 class="fix">Fix â€” added to <code>people-watcher.css</code></h3>
+    <pre>/* Blazor app root â€” must be a flex column so #world can flex-grow */
 #app {
     display: flex;
     flex-direction: column;
@@ -130,8 +130,8 @@
 
 <hr>
 
-<!-- ═══════════════════════════════════════════════ TURN 2 ═══ -->
-<h2>Issue 2 — SyntaxError: Private field '#app' must be declared in an enclosing class</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 2 â•â•â• -->
+<h2>Issue 2 â€” SyntaxError: Private field '#app' must be declared in an enclosing class</h2>
 
 <div class="turn">
   <div class="turn-user">
@@ -159,8 +159,8 @@ Microsoft.JSInterop.JSException ... at Home.OnAfterRenderAsync line 29</pre>
 
 <hr>
 
-<!-- ═══════════════════════════════════════════════ TURN 3 ═══ -->
-<h2>Issue 3 — "The value 'initSimulation' is not a function"</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 3 â•â•â• -->
+<h2>Issue 3 â€” "The value 'initSimulation' is not a function"</h2>
 
 <div class="turn">
   <div class="turn-user">
@@ -183,10 +183,10 @@ Microsoft.JSInterop.JSException ... at Home.OnAfterRenderAsync line 29</pre>
     <p>
       A copy of the simulation existed at
       <code>PeopleWatcher.Web\wwwroot\js\people-watcher.js</code> (20 KB),
-      but it was a plain auto-executing script — not an ES module — so it had no
+      but it was a plain auto-executing script â€” not an ES module â€” so it had no
       <code>export function initSimulation()</code>.
     </p>
-    <h3 class="fix">Fix — rewrote as proper ES module</h3>
+    <h3 class="fix">Fix â€” rewrote as proper ES module</h3>
     <p>Reconstructed <code>people-watcher.js</code> from the Web copy with these Blazor-specific adaptations:</p>
     <ul>
       <li><code>tooltip</code> assigned inside <code>initSimulation()</code>, not at parse time (DOM not ready until after Razor renders)</li>
@@ -206,14 +206,14 @@ export function initSimulation() {
 
 <hr>
 
-<!-- ═══════════════════════════════════════════════ TURN 4 ═══ -->
-<h2>Tuning — More talking, longer conversations</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 4 â•â•â• -->
+<h2>Tuning â€” More talking, longer conversations</h2>
 
 <div class="turn">
   <div class="turn-user">
     <div class="role role-user">User</div>
     I have not seen a single talk or conversation. They need to talk frequently.
-    Extend their stamina/energy ×5.
+    Extend their stamina/energy Ã—5.
   </div>
 </div>
 
@@ -226,8 +226,8 @@ export function initSimulation() {
       <tbody>
         <tr><td><code>TALK_DIST</code></td><td>130px</td><td>250px</td><td>People find partners across nearly the whole stage</td></tr>
         <tr><td><code>SOCIAL_URGENT</code></td><td>30%</td><td>60%</td><td>Urgency boost kicks in sooner; everyone craves talk earlier</td></tr>
-        <tr><td>Talking weights</td><td>8–56</td><td>40–72</td><td>Every personality now strongly prefers talking</td></tr>
-        <tr><td><code>ACTIVITY_TICKS.talking</code></td><td>[2, 5] ticks</td><td>[10, 25] ticks (×5)</td><td>Conversations last ~22–55 s instead of 4–11 s</td></tr>
+        <tr><td>Talking weights</td><td>8â€“56</td><td>40â€“72</td><td>Every personality now strongly prefers talking</td></tr>
+        <tr><td><code>ACTIVITY_TICKS.talking</code></td><td>[2, 5] ticks</td><td>[10, 25] ticks (Ã—5)</td><td>Conversations last ~22â€“55 s instead of 4â€“11 s</td></tr>
       </tbody>
     </table>
     <pre>const TALK_DIST    = 250;
@@ -250,34 +250,34 @@ const ACTIVITY_TICKS = {
 
 <hr>
 
-<!-- ═══════════════════════════════════════════════ SUMMARY ══ -->
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• SUMMARY â•â• -->
 <h2>Files Modified</h2>
 <ul>
   <li>
     <span class="tag">CSS</span>
     <code>PeopleWatcher.Blazor\wwwroot\css\people-watcher.css</code>
-    — Added <code>#app</code> flex layout and <code>#blazor-error-ui { display:none }</code>
+    â€” Added <code>#app</code> flex layout and <code>#blazor-error-ui { display:none }</code>
   </li>
   <li>
     <span class="tag">JS</span>
     <code>PeopleWatcher.Blazor\wwwroot\js\people-watcher.js</code>
-    — Restored as ES module with <code>export function initSimulation()</code>;
+    â€” Restored as ES module with <code>export function initSimulation()</code>;
       tuned talking constants
   </li>
 </ul>
 
 <h2>Key Lessons</h2>
 <ul>
-  <li>Blazor's <code>#blazor-error-ui</code> requires <code>display:none</code> in CSS — the framework does not hide it programmatically at startup.</li>
+  <li>Blazor's <code>#blazor-error-ui</code> requires <code>display:none</code> in CSS â€” the framework does not hide it programmatically at startup.</li>
   <li>When replacing <code>app.css</code> with a custom stylesheet, both the error UI rule and <code>#app</code> flex styles must be explicitly included.</li>
   <li>Blazor WASM JS interop requires ES modules (<code>export function</code>); plain auto-executing scripts are incompatible with <code>import()</code> + <code>InvokeVoidAsync</code>.</li>
-  <li>DOM elements must not be queried at module parse time in Blazor — defer all <code>getElementById</code> calls to inside the exported entry-point function.</li>
+  <li>DOM elements must not be queried at module parse time in Blazor â€” defer all <code>getElementById</code> calls to inside the exported entry-point function.</li>
 </ul>
 
 <hr>
 
-<!-- ═══════════════════════════════════════════════ TURN 5 ═══ -->
-<h2>Turn 5 — Add chat-summary.html to the solution</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 5 â•â•â• -->
+<h2>Turn 5 â€” Add chat-summary.html to the solution</h2>
 
 <div class="turn">
   <div class="turn-user">
@@ -301,8 +301,8 @@ const ACTIVITY_TICKS = {
 
 <hr>
 
-<!-- ═══════════════════════════════════════════════ TURN 6 ═══ -->
-<h2>Turn 6 — Keep chat-summary.html updated going forward</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 6 â•â•â• -->
+<h2>Turn 6 â€” Keep chat-summary.html updated going forward</h2>
 
 <div class="turn">
   <div class="turn-user">
@@ -322,8 +322,8 @@ const ACTIVITY_TICKS = {
 
 <hr>
 
-<!-- ═══════════════════════════════════════════════ TURN 7 ═══ -->
-<h2>Turn 7 — Stick-figure people, randomized appearance, name above head, name in bubble</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 7 â•â•â• -->
+<h2>Turn 7 â€” Stick-figure people, randomized appearance, name above head, name in bubble</h2>
 
 <div class="turn">
   <div class="turn-user">
@@ -337,40 +337,40 @@ const ACTIVITY_TICKS = {
   <div class="turn-assistant">
     <div class="role role-copilot">GitHub Copilot</div>
 
-    <h3>CSS changes — <code>people-watcher.css</code></h3>
+    <h3>CSS changes â€” <code>people-watcher.css</code></h3>
     <ul>
       <li>Replaced the solid coloured square <code>.person</code> block with a transparent flex-column container (60 px wide)</li>
-      <li>Added <code>.name-above</code> — white bold label that sits above the SVG figure via flexbox order</li>
+      <li>Added <code>.name-above</code> â€” white bold label that sits above the SVG figure via flexbox order</li>
       <li>Added <code>.personality-badge</code> repositioned to float beside the figure head</li>
       <li>Moved <code>.social-bar</code> to the left side of the figure</li>
       <li>Changed activity animations to target <code>.figure</code> (the SVG element) instead of the whole container</li>
-      <li>Added <code>.bubble-name</code> — red bold speaker-name header inside chat bubbles</li>
+      <li>Added <code>.bubble-name</code> â€” red bold speaker-name header inside chat bubbles</li>
       <li>Added <code>.bubble-text</code> for the message body</li>
     </ul>
 
-    <h3>JS changes — <code>people-watcher.js</code></h3>
+    <h3>JS changes â€” <code>people-watcher.js</code></h3>
     <ul>
-      <li>Reduced <code>PERSON_SIZE</code> from 80 → 60 (figure width)</li>
+      <li>Reduced <code>PERSON_SIZE</code> from 80 â†’ 60 (figure width)</li>
       <li>Added <code>SKIN_TONES</code>, <code>HAT_STYLES</code>, <code>SHIRT_COLORS</code> constant arrays</li>
-      <li>Added <code>randomAppearance()</code> — picks skin tone, hat style/colour, shirt colour, head size, body height, leg length, arm angle</li>
-      <li>Added <code>buildFigureSVG(p)</code> — generates an inline SVG stick figure: circle head, body line, two leg lines, two arm lines, optional hat (cap / beanie / top hat / hood)</li>
+      <li>Added <code>randomAppearance()</code> â€” picks skin tone, hat style/colour, shirt colour, head size, body height, leg length, arm angle</li>
+      <li>Added <code>buildFigureSVG(p)</code> â€” generates an inline SVG stick figure: circle head, body line, two leg lines, two arm lines, optional hat (cap / beanie / top hat / hood)</li>
       <li>Updated <code>createPerson()</code> to include <code>appearance: randomAppearance()</code></li>
-      <li>Updated <code>spawnPeople()</code> — builds person element as flex column: <code>.name-above</code> → SVG figure → <code>.personality-badge</code> → <code>.social-bar</code></li>
-      <li>Updated <code>renderPerson()</code> — removed activity-icon update (no longer present); bubble now renders <code>&lt;span class="bubble-name"&gt;Name&lt;/span&gt;</code> + <code>&lt;span class="bubble-text"&gt;message&lt;/span&gt;</code></li>
+      <li>Updated <code>spawnPeople()</code> â€” builds person element as flex column: <code>.name-above</code> â†’ SVG figure â†’ <code>.personality-badge</code> â†’ <code>.social-bar</code></li>
+      <li>Updated <code>renderPerson()</code> â€” removed activity-icon update (no longer present); bubble now renders <code>&lt;span class="bubble-name"&gt;Name&lt;/span&gt;</code> + <code>&lt;span class="bubble-text"&gt;message&lt;/span&gt;</code></li>
     </ul>
 
     <h3>Example bubble output</h3>
     <pre>&lt;div class="chat-bubble"&gt;
   &lt;span class="bubble-name"&gt;Alice&lt;/span&gt;
-  &lt;span class="bubble-text"&gt;Nice weather today! ☀️&lt;/span&gt;
+  &lt;span class="bubble-text"&gt;Nice weather today! â˜€ï¸&lt;/span&gt;
 &lt;/div&gt;</pre>
   </div>
 </div>
 
 <hr>
 
-<!-- ═══════════════════════════════════════════════ TURN 8 ═══ -->
-<h2>Turn 8 — Thought bubbles (inner monologue, non-obstructing)</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 8 â•â•â• -->
+<h2>Turn 8 â€” Thought bubbles (inner monologue, non-obstructing)</h2>
 
 <div class="turn">
   <div class="turn-user">
@@ -385,43 +385,43 @@ const ACTIVITY_TICKS = {
   <div class="turn-assistant">
     <div class="role role-copilot">GitHub Copilot</div>
 
-    <h3>Layout strategy — no overlap</h3>
+    <h3>Layout strategy â€” no overlap</h3>
     <ul>
-      <li><strong>Chat bubbles</strong> → positioned <em>below</em> the figure (below the feet, left-offset)</li>
-      <li><strong>Thought bubbles</strong> → positioned <em>above</em> the figure (above the name label, right-offset)</li>
+      <li><strong>Chat bubbles</strong> â†’ positioned <em>below</em> the figure (below the feet, left-offset)</li>
+      <li><strong>Thought bubbles</strong> â†’ positioned <em>above</em> the figure (above the name label, right-offset)</li>
       <li>Opposite vertical directions + horizontal offsets ensure they never occupy the same space</li>
     </ul>
 
-    <h3>CSS — <code>people-watcher.css</code></h3>
+    <h3>CSS â€” <code>people-watcher.css</code></h3>
     <ul>
-      <li>Added <code>.thought-bubble</code> — cloud-shaped via <code>border-radius: 50% 50% 45% 45% / 55% 55% 45% 45%</code>, light blue-white tint, italic text, <code>z-index:4</code> (below chat bubbles at z-index:5)</li>
+      <li>Added <code>.thought-bubble</code> â€” cloud-shaped via <code>border-radius: 50% 50% 45% 45% / 55% 55% 45% 45%</code>, light blue-white tint, italic text, <code>z-index:4</code> (below chat bubbles at z-index:5)</li>
       <li><code>::before</code> / <code>::after</code> pseudo-elements add two small trailing circles pointing down toward the figure's head</li>
       <li><code>transform: translateX(-20%)</code> offsets the bubble rightward so it clears the name label</li>
       <li>Added <code>@keyframes thoughtPop</code> animation on appearance</li>
     </ul>
 
-    <h3>JS — <code>people-watcher.js</code></h3>
+    <h3>JS â€” <code>people-watcher.js</code></h3>
     <ul>
-      <li>Added <code>THOUGHTS</code> object — per-personality inner monologue arrays, often contradicting what they say out loud (e.g. grumpy thinking <em>"OK fine, this is nice"</em> while saying <em>"Ugh, not you again."</em>)</li>
+      <li>Added <code>THOUGHTS</code> object â€” per-personality inner monologue arrays, often contradicting what they say out loud (e.g. grumpy thinking <em>"OK fine, this is nice"</em> while saying <em>"Ugh, not you again."</em>)</li>
       <li>Added <code>pickThought(personality)</code> helper</li>
       <li>Added <code>thoughts</code> Map to state (alongside <code>bubbles</code>)</li>
       <li>Added <code>thought</code> + <code>thoughtTimer</code> fields to each person in <code>createPerson()</code></li>
-      <li><code>tick()</code> decrements <code>thoughtTimer</code> and rotates <code>thought</code> every 3–7 ticks for each person</li>
+      <li><code>tick()</code> decrements <code>thoughtTimer</code> and rotates <code>thought</code> every 3â€“7 ticks for each person</li>
       <li><code>gameLoop()</code> repositions thought bubble elements each frame (above head, right side)</li>
-      <li><code>renderPerson()</code> creates/updates/removes thought bubbles — shown for <em>all</em> activities, not just talking</li>
+      <li><code>renderPerson()</code> creates/updates/removes thought bubbles â€” shown for <em>all</em> activities, not just talking</li>
       <li><code>spawnPeople()</code> clears <code>.thought-bubble</code> elements and the <code>thoughts</code> Map on respawn</li>
     </ul>
 
     <h3>Example: talking Alice</h3>
-    <pre>Chat bubble (below, left):   "Nice weather today! ☀️"
+    <pre>Chat bubble (below, left):   "Nice weather today! â˜€ï¸"
 Thought bubble (above, right): "I hope this ends soon."</pre>
   </div>
 </div>
 
 <hr>
 
-<!-- ═══════════════════════════════════════════════ TURN 9 ═══ -->
-<h2>Turn 9 — Cul-de-sac neighbourhood, houses, hosting &amp; visiting</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 9 â•â•â• -->
+<h2>Turn 9 â€” Cul-de-sac neighbourhood, houses, hosting &amp; visiting</h2>
 
 <div class="turn">
   <div class="turn-user">
@@ -457,19 +457,19 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
 
     <h3>Indoors visual state</h3>
     <ul>
-      <li><code>.person.indoors</code> → <code>opacity: .72; transform: scale(.82)</code> — visually inside the house</li>
-      <li><code>.activity-hosting</code> → warm orange glow; <code>.activity-visiting</code> → cool blue glow</li>
+      <li><code>.person.indoors</code> â†’ <code>opacity: .72; transform: scale(.82)</code> â€” visually inside the house</li>
+      <li><code>.activity-hosting</code> â†’ warm orange glow; <code>.activity-visiting</code> â†’ cool blue glow</li>
     </ul>
 
     <h3>JS architecture changes</h3>
     <ul>
       <li>Added <code>houses[]</code> array (parallel to <code>people[]</code>) with <code>{x, y, doorX, doorY, angle}</code> per house</li>
-      <li><code>createPerson(index, house)</code> — spawns each person near their own front door; stores <code>homeIndex</code> and <code>guestOfIndex</code></li>
-      <li><code>culdesacLayout()</code> — computes road circle and house positions from current world dimensions</li>
-      <li><code>buildCuldesacSVG(layout)</code> — generates SVG markup string; re-run on resize</li>
-      <li><code>updateHouseGuests()</code> — refreshes guest badge visibility after hosting/visiting state changes</li>
-      <li><code>tick()</code> — handles hosting end (evicts all guests), visiting end (guest leaves independently), eating/sleeping routing home</li>
-      <li><code>gameLoop()</code> — separate movement branches for each activity including smooth walk-to-door and indoor snap</li>
+      <li><code>createPerson(index, house)</code> â€” spawns each person near their own front door; stores <code>homeIndex</code> and <code>guestOfIndex</code></li>
+      <li><code>culdesacLayout()</code> â€” computes road circle and house positions from current world dimensions</li>
+      <li><code>buildCuldesacSVG(layout)</code> â€” generates SVG markup string; re-run on resize</li>
+      <li><code>updateHouseGuests()</code> â€” refreshes guest badge visibility after hosting/visiting state changes</li>
+      <li><code>tick()</code> â€” handles hosting end (evicts all guests), visiting end (guest leaves independently), eating/sleeping routing home</li>
+      <li><code>gameLoop()</code> â€” separate movement branches for each activity including smooth walk-to-door and indoor snap</li>
       <li><code>INVITE_LINES</code> array for host chat bubble messages</li>
       <li>Stats bar only shows activity counts &gt; 0</li>
     </ul>
@@ -478,8 +478,8 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
 
 <hr>
 
-<!-- ══════════════════════════════════════════════ TURN 10 ═══ -->
-<h2>Turn 10 — Update chat-summary.html with all chats</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 10 â•â•â• -->
+<h2>Turn 10 â€” Update chat-summary.html with all chats</h2>
 
 <div class="turn">
   <div class="turn-user">
@@ -501,7 +501,7 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
         <tr><td>1</td><td>Fix error banner + no squares (CSS layout bugs)</td><td><code>people-watcher.css</code></td></tr>
         <tr><td>2</td><td>SyntaxError: private field <code>#app</code> in JS</td><td><code>people-watcher.js</code></td></tr>
         <tr><td>3</td><td><code>initSimulation</code> not a function (wiped JS file)</td><td><code>people-watcher.js</code> (full restore as ES module)</td></tr>
-        <tr><td>4</td><td>Boost talking frequency + ×5 conversation stamina</td><td><code>people-watcher.js</code></td></tr>
+        <tr><td>4</td><td>Boost talking frequency + Ã—5 conversation stamina</td><td><code>people-watcher.js</code></td></tr>
         <tr><td>5</td><td>Add <code>chat-summary.html</code> to solution</td><td><code>PeopleWatcher.slnx</code></td></tr>
         <tr><td>6</td><td>Keep chat-summary updated going forward</td><td>Memory saved</td></tr>
         <tr><td>7</td><td>Stick-figure people, randomised appearance, name above head, name in bubble</td><td><code>people-watcher.css</code>, <code>people-watcher.js</code></td></tr>
@@ -515,8 +515,8 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
 
 <hr>
 
-<!-- ══════════════════════════════════════════════ TURN 11 ═══ -->
-<h2>Turn 11 — Increase people and houses to 10</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 11 â•â•â• -->
+<h2>Turn 11 â€” Increase people and houses to 10</h2>
 
 <div class="turn">
   <div class="turn-user">
@@ -530,19 +530,19 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
     <div class="role role-copilot">GitHub Copilot</div>
     <p>Two changes to <code>people-watcher.js</code>:</p>
     <ul>
-      <li><code>PEOPLE_COUNT</code> — changed from <code>5</code> to <code>10</code></li>
-      <li><code>HOUSE_COLORS</code> — extended from 5 to 10 unique colour schemes so every house has a distinct look</li>
+      <li><code>PEOPLE_COUNT</code> â€” changed from <code>5</code> to <code>10</code></li>
+      <li><code>HOUSE_COLORS</code> â€” extended from 5 to 10 unique colour schemes so every house has a distinct look</li>
     </ul>
     <p>The cul-de-sac layout (<code>culdesacLayout()</code>) already distributes houses evenly around the road circle using
-    <code>i / PEOPLE_COUNT * 2π</code>, so all 10 houses and 10 people are placed automatically with no other changes needed.</p>
+    <code>i / PEOPLE_COUNT * 2Ï€</code>, so all 10 houses and 10 people are placed automatically with no other changes needed.</p>
   </div>
 </div>
 
 
 <hr>
 
-<!-- ══════════════════════════════════════════════ TURN 12 ═══ -->
-<h2>Turn 12 — Full Relationship System</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 12 â•â•â• -->
+<h2>Turn 12 â€” Full Relationship System</h2>
 
 <div class="turn">
   <div class="turn-user">
@@ -557,68 +557,68 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
   <div class="turn-assistant">
     <div class="role role-copilot">GitHub Copilot</div>
     <p>Implemented a full pairwise relationship system in <code>people-watcher.js</code>. All changes were additions/
-    modifications to the existing engine — no files were created or removed.</p>
+    modifications to the existing engine â€” no files were created or removed.</p>
 
     <h3>New constants</h3>
     <ul>
-      <li><code>LIAR_CHANCE</code> — per-personality probability of being a liar
+      <li><code>LIAR_CHANCE</code> â€” per-personality probability of being a liar
         (extroverts highest at 25 %, grumpy lowest at 5 %)</li>
-      <li><code>COMPAT</code> — 6×6 personality compatibility matrix; determines how much two people's relationship
+      <li><code>COMPAT</code> â€” 6Ã—6 personality compatibility matrix; determines how much two people's relationship
         shifts after chatting (e.g. cheerful + extrovert bond quickly; grumpy + energetic clash)</li>
-      <li><code>RELATION_THOUGHTS</code> — five tiers of internal thought snippets (love / like / neutral / dislike / hate)
+      <li><code>RELATION_THOUGHTS</code> â€” five tiers of internal thought snippets (love / like / neutral / dislike / hate)
         that surface in the thought bubble after a conversation ends</li>
     </ul>
 
     <h3>New state per person</h3>
     <ul>
-      <li><code>relations[id]</code> — true feeling toward every other person, −100 → +100</li>
-      <li><code>perceivedRelations[id]</code> — what they <em>show</em>; liars show false warmth when feeling < −20</li>
-      <li><code>liar: boolean</code> — set randomly on spawn according to <code>LIAR_CHANCE</code></li>
+      <li><code>relations[id]</code> â€” true feeling toward every other person, âˆ’100 â†’ +100</li>
+      <li><code>perceivedRelations[id]</code> â€” what they <em>show</em>; liars show false warmth when feeling < âˆ’20</li>
+      <li><code>liar: boolean</code> â€” set randomly on spawn according to <code>LIAR_CHANCE</code></li>
     </ul>
 
     <h3>New functions</h3>
     <ul>
-      <li><strong><code>initRelations()</code></strong> — called once after all people are created; seeds every pair with a
-        random −100→+100 base feeling; liars get a desynced <code>perceivedRelations</code></li>
-      <li><strong><code>driftRelations(a, b)</code></strong> — called at the end of every conversation:
+      <li><strong><code>initRelations()</code></strong> â€” called once after all people are created; seeds every pair with a
+        random âˆ’100â†’+100 base feeling; liars get a desynced <code>perceivedRelations</code></li>
+      <li><strong><code>driftRelations(a, b)</code></strong> â€” called at the end of every conversation:
         <ul>
           <li>Applies compatibility bonus/penalty from <code>COMPAT</code></li>
           <li>Third-party alignment: if B likes person C and A also likes C, A and B bond more; if they disagree about C they drift apart</li>
-          <li>Clamps both sides to −100/+100</li>
+          <li>Clamps both sides to âˆ’100/+100</li>
           <li>Re-syncs liars' perceived values</li>
         </ul>
       </li>
-      <li><strong><code>relationColor(avg)</code></strong> — returns green / yellow / red stroke colour for talk lines</li>
-      <li><strong><code>relationEmoji(val)</code></strong> — returns ❤️/😊/😐/😒/😡 for tooltip display</li>
-      <li><strong><code>pickRelationThought(val)</code></strong> — picks a thought snippet matching the tier of the feeling</li>
+      <li><strong><code>relationColor(avg)</code></strong> â€” returns green / yellow / red stroke colour for talk lines</li>
+      <li><strong><code>relationEmoji(val)</code></strong> â€” returns â¤ï¸/ðŸ˜Š/ðŸ˜/ðŸ˜’/ðŸ˜¡ for tooltip display</li>
+      <li><strong><code>pickRelationThought(val)</code></strong> â€” picks a thought snippet matching the tier of the feeling</li>
     </ul>
 
     <h3>Behaviour changes</h3>
     <ul>
-      <li><strong>Talk targeting</strong> — people avoid initiating conversations with anyone they hate (< −60); among
+      <li><strong>Talk targeting</strong> â€” people avoid initiating conversations with anyone they hate (< âˆ’60); among
         willing candidates they prefer the most-liked person via a weighted comparison</li>
-      <li><strong>Walk-toward</strong> — when seeking someone to talk to, they walk toward their most-liked available
+      <li><strong>Walk-toward</strong> â€” when seeking someone to talk to, they walk toward their most-liked available
         person instead of the most socially needy</li>
-      <li><strong>Thought bubbles</strong> — after each conversation ends, both participants get a relation-aware thought
-        ("I could talk to them forever." / "I absolutely can't stand them.") lasting 4–8 ticks</li>
-      <li><strong>Talk lines</strong> — colour reflects the true average feeling between the pair:
-        green (avg ≥ 30), yellow (−30 to 30), red (avg &lt; −30)</li>
-      <li><strong>Tooltip</strong> — now shows a full relationship roster for the hovered person: true value, emoji tier,
+      <li><strong>Thought bubbles</strong> â€” after each conversation ends, both participants get a relation-aware thought
+        ("I could talk to them forever." / "I absolutely can't stand them.") lasting 4â€“8 ticks</li>
+      <li><strong>Talk lines</strong> â€” colour reflects the true average feeling between the pair:
+        green (avg â‰¥ 30), yellow (âˆ’30 to 30), red (avg &lt; âˆ’30)</li>
+      <li><strong>Tooltip</strong> â€” now shows a full relationship roster for the hovered person: true value, emoji tier,
         and a <em style="color:#ffa040">(lies)</em> tag on any row where their shown feeling differs significantly from
-        the truth; liars get a 🎭 badge next to their name</li>
+        the truth; liars get a ðŸŽ­ badge next to their name</li>
     </ul>
 
     <h3>Files changed</h3>
     <ul>
-      <li><code>PeopleWatcher.Blazor\wwwroot\js\people-watcher.js</code> — 8 targeted replacements, ~120 lines added</li>
+      <li><code>PeopleWatcher.Blazor\wwwroot\js\people-watcher.js</code> â€” 8 targeted replacements, ~120 lines added</li>
     </ul>
   </div>
 </div>
 
 <hr>
 
-<!-- ══════════════════════════════════════════════ TURN 13 ═══ -->
-<h2>Turn 13 — Halved speed &amp; Day/Night Cycle</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 13 â•â•â• -->
+<h2>Turn 13 â€” Halved speed &amp; Day/Night Cycle</h2>
 
 <div class="turn">
   <div class="turn-user">
@@ -652,10 +652,10 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
     <ul>
       <li><strong>Constants:</strong> <code>DAY_TICKS = 55</code> (~2 min real time at 2200 ms/tick),
         <code>NIGHT_TICKS = 18</code> (~40 s). Stored in a <code>cycleTimer</code> that counts down each tick.</li>
-      <li><strong><code>triggerNightfall()</code></strong> — cancels all active conversations, sends every person
+      <li><strong><code>triggerNightfall()</code></strong> â€” cancels all active conversations, sends every person
         home with <code>activity = 'sleeping'</code> for the full night duration, clears all talk lines, enables
         the dark overlay.</li>
-      <li><strong><code>triggerSunrise()</code></strong> — wakes everyone up, places them just outside their front
+      <li><strong><code>triggerSunrise()</code></strong> â€” wakes everyone up, places them just outside their front
         door with a fresh <code>moving</code> activity, removes the night overlay.</li>
       <li><strong>Tick gate:</strong> while <code>isNight</code>, the normal activity tick logic is skipped entirely
         so no one picks a new action mid-sleep.</li>
@@ -667,11 +667,11 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
     <ul>
       <li>Added <code>&lt;div id="night-overlay"&gt;&lt;/div&gt;</code> inside <code>#world</code> in
         <code>Home.razor</code>.</li>
-      <li><code>#night-overlay.active</code> — dark blue-black semi-transparent layer with a smooth 3-second
+      <li><code>#night-overlay.active</code> â€” dark blue-black semi-transparent layer with a smooth 3-second
         CSS fade-in/out transition.</li>
-      <li><code>#night-overlay.active::after</code> — 🌙 moon emoji animates in from the top-right on nightfall.</li>
-      <li><code>#world.night</code> — the world background transitions to a darker green (<code>#1a2a18</code>).</li>
-      <li>A brief ☀️ sun animation plays on the overlay at sunrise.</li>
+      <li><code>#night-overlay.active::after</code> â€” ðŸŒ™ moon emoji animates in from the top-right on nightfall.</li>
+      <li><code>#world.night</code> â€” the world background transitions to a darker green (<code>#1a2a18</code>).</li>
+      <li>A brief â˜€ï¸ sun animation plays on the overlay at sunrise.</li>
     </ul>
 
     <h3>Files changed</h3>
@@ -685,8 +685,8 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
 
 <hr>
 
-<!-- ══════════════════════════════════════════════ TURN 14 ═══ -->
-<h2>Turn 14 — Mafia Murder Mystery Game</h2>
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 14 â•â•â• -->
+<h2>Turn 14 â€” Mafia Murder Mystery Game</h2>
 
 <div class="turn">
   <div class="turn-user">
@@ -695,7 +695,7 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
     Each night, the murderer kills one person. When the people wake up, they find out who is dead.
     They all get together and discuss who they think the murderer is. They vote and the person with
     the most votes dies. If the murdered person is the murderer, the townspeople win. The murderer's
-    goal is to stay until the very end — manipulate and lie and blame others.
+    goal is to stay until the very end â€” manipulate and lie and blame others.
     Adjust all personalities and relationships to accommodate this change.
   </div>
 </div>
@@ -710,18 +710,18 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
     <table>
       <thead><tr><th>Phase</th><th>Duration</th><th>What happens</th></tr></thead>
       <tbody>
-        <tr><td>☀️ <code>day</code></td><td>55 ticks (~2 min)</td><td>Normal simulation — socialising, hosting, eating</td></tr>
-        <tr><td>🌙 <code>night</code></td><td>10 ticks (~22 s)</td><td>Everyone goes home; murderer's victim is chosen</td></tr>
-        <tr><td>🌅 <code>dawn</code></td><td>6 ticks</td><td>Victim's body revealed with ⚰️ marker; mourn messages shown</td></tr>
-        <tr><td>🗣️ <code>debate</code></td><td>30 ticks (~66 s)</td><td>All living people walk to the road centre; debate bubbles shown</td></tr>
-        <tr><td>🗳️ <code>vote</code></td><td>4 ticks</td><td>Vote conducted; everyone shows vote message</td></tr>
-        <tr><td>🎮 <code>over</code></td><td>—</td><td>Game-over overlay shown with winner</td></tr>
+        <tr><td>â˜€ï¸ <code>day</code></td><td>55 ticks (~2 min)</td><td>Normal simulation â€” socialising, hosting, eating</td></tr>
+        <tr><td>ðŸŒ™ <code>night</code></td><td>10 ticks (~22 s)</td><td>Everyone goes home; murderer's victim is chosen</td></tr>
+        <tr><td>ðŸŒ… <code>dawn</code></td><td>6 ticks</td><td>Victim's body revealed with âš°ï¸ marker; mourn messages shown</td></tr>
+        <tr><td>ðŸ—£ï¸ <code>debate</code></td><td>30 ticks (~66 s)</td><td>All living people walk to the road centre; debate bubbles shown</td></tr>
+        <tr><td>ðŸ—³ï¸ <code>vote</code></td><td>4 ticks</td><td>Vote conducted; everyone shows vote message</td></tr>
+        <tr><td>ðŸŽ® <code>over</code></td><td>â€”</td><td>Game-over overlay shown with winner</td></tr>
       </tbody>
     </table>
 
     <h3>Murderer AI</h3>
     <ul>
-      <li>Picked at spawn — biased toward <em>extrovert</em> or <em>grumpy</em> personalities (better liars)</li>
+      <li>Picked at spawn â€” biased toward <em>extrovert</em> or <em>grumpy</em> personalities (better liars)</li>
       <li>Always flagged <code>liar = true</code>; perceived relations set artificially warm toward everyone</li>
       <li>Each night, targets the person they have the most negative true relation toward</li>
       <li>During day conversations, occasionally drops <code>MURDERER_BLUFF</code> lines ("Trust me, I'm on your side.")</li>
@@ -738,26 +738,26 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
 
     <h3>Win/loss conditions</h3>
     <ul>
-      <li><strong>Town wins</strong> — the voted-out person is the murderer → "🏘️ Town Wins!" overlay</li>
-      <li><strong>Murderer wins</strong> — murderer is the last person (or last 2) standing → "🔪 Murderer Wins!" overlay</li>
+      <li><strong>Town wins</strong> â€” the voted-out person is the murderer â†’ "ðŸ˜ï¸ Town Wins!" overlay</li>
+      <li><strong>Murderer wins</strong> â€” murderer is the last person (or last 2) standing â†’ "ðŸ”ª Murderer Wins!" overlay</li>
       <li>Overlay shows the murderer's name and a Play Again button that calls <code>spawnPeople()</code></li>
     </ul>
 
     <h3>Visual additions</h3>
     <ul>
-      <li><strong>Phase label</strong> in the header bar — colour-coded per phase (blue night, orange dawn, yellow debate, purple vote, red over)</li>
-      <li><strong>⚰️ dead markers</strong> placed near the victim's house door with name tag; animate in with a drop</li>
-      <li><strong>Dead persons</strong> get <code>.dead</code> CSS class — greyed out at 28% opacity; tooltip shows "Deceased"</li>
-      <li><strong>Murderer badge</strong> in tooltip — 🔪 and red "(murderer)" label visible to the observer</li>
-      <li><strong>Stats bar</strong> shows 👥 Alive / ⚰️ Dead counts alongside activities</li>
-      <li><strong>Game-over overlay</strong> — full-screen blur with result card and Play Again button</li>
+      <li><strong>Phase label</strong> in the header bar â€” colour-coded per phase (blue night, orange dawn, yellow debate, purple vote, red over)</li>
+      <li><strong>âš°ï¸ dead markers</strong> placed near the victim's house door with name tag; animate in with a drop</li>
+      <li><strong>Dead persons</strong> get <code>.dead</code> CSS class â€” greyed out at 28% opacity; tooltip shows "Deceased"</li>
+      <li><strong>Murderer badge</strong> in tooltip â€” ðŸ”ª and red "(murderer)" label visible to the observer</li>
+      <li><strong>Stats bar</strong> shows ðŸ‘¥ Alive / âš°ï¸ Dead counts alongside activities</li>
+      <li><strong>Game-over overlay</strong> â€” full-screen blur with result card and Play Again button</li>
     </ul>
 
     <h3>Files changed</h3>
     <ul>
-      <li><code>PeopleWatcher.Blazor\wwwroot\js\people-watcher.js</code> — ~200 lines added/replaced</li>
-      <li><code>PeopleWatcher.Blazor\wwwroot\css\people-watcher.css</code> — phase label, dead marker, dead person, game-over overlay</li>
-      <li><code>PeopleWatcher.Blazor\Pages\Home.razor</code> — added phase-label div and game-over overlay HTML</li>
+      <li><code>PeopleWatcher.Blazor\wwwroot\js\people-watcher.js</code> â€” ~200 lines added/replaced</li>
+      <li><code>PeopleWatcher.Blazor\wwwroot\css\people-watcher.css</code> â€” phase label, dead marker, dead person, game-over overlay</li>
+      <li><code>PeopleWatcher.Blazor\Pages\Home.razor</code> â€” added phase-label div and game-over overlay HTML</li>
     </ul>
   </div>
 </div>
@@ -766,11 +766,11 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
 <hr>
 
 <!-- TURN 15 -->
-<h2>Turn 15 � Timing overhaul, house-door debate, sequential voting, memory &amp; persuasion</h2>
+<h2>Turn 15 ï¿½ Timing overhaul, house-door debate, sequential voting, memory &amp; persuasion</h2>
 <div class="turn">
   <div class="turn-user">
     <div class="role role-user">User</div>
-    Reduce conversations to 10 seconds. Reduce daytime to 1 minute. At 50 seconds into the day, all conversations stop and everyone goes to their own house. Night is reduced to 5 seconds and is just a black screen. When they are debating who the killer is, each stands in front of their house. After discussing for 30 seconds, each person gets to vote on the person THEY think is the murderer. They vote one at a time. Each person votes in order, show their vote for 3 seconds before moving on. The person with the most points is killed like normal. Adjust their personalities � some easily remember who voted for who. If a person feels strongly they know who the murderer is (or if its the murderer pretending), they try to convince the others to vote their way. It is easier to convince someone that likes them to vote their way. After the vote is done, the day (1 minute) begins.
+    Reduce conversations to 10 seconds. Reduce daytime to 1 minute. At 50 seconds into the day, all conversations stop and everyone goes to their own house. Night is reduced to 5 seconds and is just a black screen. When they are debating who the killer is, each stands in front of their house. After discussing for 30 seconds, each person gets to vote on the person THEY think is the murderer. They vote one at a time. Each person votes in order, show their vote for 3 seconds before moving on. The person with the most points is killed like normal. Adjust their personalities ï¿½ some easily remember who voted for who. If a person feels strongly they know who the murderer is (or if its the murderer pretending), they try to convince the others to vote their way. It is easier to convince someone that likes them to vote their way. After the vote is done, the day (1 minute) begins.
   </div>
 </div>
 <div class="turn">
@@ -807,7 +807,7 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
 <hr>
 
 <!-- TURN 16 -->
-<h2>Turn 16 � Vote tally panel + condemned walks to centre</h2>
+<h2>Turn 16 ï¿½ Vote tally panel + condemned walks to centre</h2>
 <div class="turn">
   <div class="turn-user">
     <div class="role role-user">User</div>
@@ -830,7 +830,7 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
     <ul>
       <li>New <code>PHASE.EXECUTE</code> state added to the phase machine</li>
       <li><code>triggerExecute()</code> now sets <code>condemnedId</code>, targets the world centre, adds <code>.condemned</code> red-glow CSS class, then enters <code>PHASE.EXECUTE</code></li>
-      <li>In <code>gameLoop()</code>: during EXECUTE, only the condemned person moves (everyone else frozen watching); they walk at 1.5� speed toward the centre</li>
+      <li>In <code>gameLoop()</code>: during EXECUTE, only the condemned person moves (everyone else frozen watching); they walk at 1.5ï¿½ speed toward the centre</li>
       <li>In <code>tick()</code>: once the condemned is within 20px of centre, a 3-tick countdown fires <code>finaliseExecution()</code></li>
       <li><code>finaliseExecution()</code> places the death marker at the centre position (not the house), then starts the new day</li>
       <li>Phase label shows: <em>"?? Alice walks to the centre..."</em></li>
@@ -838,8 +838,8 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
     </ul>
     <h3>Files changed</h3>
     <ul>
-      <li><code>PeopleWatcher.Blazor\Pages\Home.razor</code> � added <code>#vote-tally</code> div</li>
-      <li><code>PeopleWatcher.Blazor\wwwroot\js\people-watcher.js</code> � PHASE.EXECUTE, condemnedId/executeTimer state, updateVoteTally(), triggerExecute() rewrite, finaliseExecution(), tick() EXECUTE branch, gameLoop() EXECUTE movement</li>
+      <li><code>PeopleWatcher.Blazor\Pages\Home.razor</code> ï¿½ added <code>#vote-tally</code> div</li>
+      <li><code>PeopleWatcher.Blazor\wwwroot\js\people-watcher.js</code> ï¿½ PHASE.EXECUTE, condemnedId/executeTimer state, updateVoteTally(), triggerExecute() rewrite, finaliseExecution(), tick() EXECUTE branch, gameLoop() EXECUTE movement</li>
       <li><code>PeopleWatcher.Blazor\wwwroot\css\people-watcher.css</code> &mdash; #vote-tally panel styles, .condemned glow, phase-execute label</li>
     </ul>
   </div>
@@ -969,24 +969,24 @@ Thought bubble (above, right): "I hope this ends soon."</pre>
 
 <hr>
 
-<!-- ══════════════════════════════════════════════ TURN 19 ═══ -->
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 19 â•â•â• -->
 <h2>Turn 19 &mdash; Fix emoji encoding &amp; black loading bar</h2>
 <div class="turn">
   <div class="turn-user">
     <div class="role role-user">User</div>
-    I sometimes see text that looks like it should be encoded or an emoji — e.g. "uD83CuDF19" at night.
+    I sometimes see text that looks like it should be encoded or an emoji â€” e.g. "uD83CuDF19" at night.
     Fix any instances of that issue. There is a large black bar that appears at the top of the page when loading. Fix it.
   </div>
 </div>
 <div class="turn">
   <div class="turn-assistant">
     <div class="role role-copilot">GitHub Copilot</div>
-    <h3 class="bug">Bug 1 — Invalid CSS Unicode escapes</h3>
+    <h3 class="bug">Bug 1 â€” Invalid CSS Unicode escapes</h3>
     <p>
       <code>people-watcher.css</code> used JavaScript surrogate-pair notation
       (<code>'\uD83C\uDF19'</code>, <code>'\u2600\uFE0F'</code>) inside CSS <code>content</code>
       properties. CSS does not understand JS-style escapes; it rendered the literal characters
-      <em>uD83CuDF19</em> instead of 🌙 and ☀️.
+      <em>uD83CuDF19</em> instead of ðŸŒ™ and â˜€ï¸.
     </p>
     <h3 class="fix">Fix 1</h3>
     <p>Replaced both with valid CSS Unicode codepoint escapes:</p>
@@ -995,16 +995,16 @@ content: '\uD83C\uDF19';  /* moon */
 content: '\u2600\uFE0F';  /* sun  */
 
 /* After (correct CSS escapes) */
-content: '\1F319';   /* 🌙 U+1F319 */
-content: '\2600\FE0F'; /* ☀️ U+2600 + variation selector */</pre>
+content: '\1F319';   /* ðŸŒ™ U+1F319 */
+content: '\2600\FE0F'; /* â˜€ï¸ U+2600 + variation selector */</pre>
 
-    <h3 class="bug">Bug 2 — Black loading bar at startup</h3>
+    <h3 class="bug">Bug 2 â€” Black loading bar at startup</h3>
     <p>
       Blazor's <code>index.html</code> contains a built-in loading spinner:
       an <code>&lt;svg class="loading-progress"&gt;</code> with two <code>&lt;circle&gt;</code>
       elements. SVG circles default to <strong>solid black fill</strong> with no explicit styling.
       Since <code>app.css</code> (which normally styles the spinner) was replaced by
-      <code>people-watcher.css</code>, the spinner had no CSS rules — rendering as a large black
+      <code>people-watcher.css</code>, the spinner had no CSS rules â€” rendering as a large black
       rectangle before Blazor finished booting.
     </p>
     <h3 class="fix">Fix 2</h3>
@@ -1023,7 +1023,7 @@ content: '\2600\FE0F'; /* ☀️ U+2600 + variation selector */</pre>
 
 <hr>
 
-<!-- ══════════════════════════════════════════════ TURN 20 ═══ -->
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 20 â•â•â• -->
 <h2>Turn 20 &mdash; Thought &amp; Social stats per person</h2>
 <div class="turn">
   <div class="turn-user">
@@ -1037,7 +1037,7 @@ content: '\2600\FE0F'; /* ☀️ U+2600 + variation selector */</pre>
   <div class="turn-assistant">
     <div class="role role-copilot">GitHub Copilot</div>
 
-    <h3>Two new fixed personality stats (1–10 scale)</h3>
+    <h3>Two new fixed personality stats (1â€“10 scale)</h3>
     <table>
       <thead><tr><th>Stat</th><th>Effect</th></tr></thead>
       <tbody>
@@ -1046,7 +1046,7 @@ content: '\2600\FE0F'; /* ☀️ U+2600 + variation selector */</pre>
       </tbody>
     </table>
 
-    <h3>Per-personality base values (± up to 2 random variance)</h3>
+    <h3>Per-personality base values (Â± up to 2 random variance)</h3>
     <table>
       <thead><tr><th>Personality</th><th>thoughtStat base</th><th>socialStat base</th></tr></thead>
       <tbody>
@@ -1062,18 +1062,18 @@ content: '\2600\FE0F'; /* ☀️ U+2600 + variation selector */</pre>
     <h3>Staggering logic</h3>
     <ul>
       <li><strong>thoughtTimer</strong> reset formula: <code>Math.max(1, Math.floor(10 / thoughtStat) + rnd(2))</code><br>
-        &rarr; thoughtStat=1: 10–11 ticks (&asymp;22 s) &nbsp;|&nbsp; thoughtStat=5: 2–3 ticks &nbsp;|&nbsp; thoughtStat=9: 1–2 ticks (&asymp;2 s)</li>
+        &rarr; thoughtStat=1: 10â€“11 ticks (&asymp;22 s) &nbsp;|&nbsp; thoughtStat=5: 2â€“3 ticks &nbsp;|&nbsp; thoughtStat=9: 1â€“2 ticks (&asymp;2 s)</li>
       <li><strong>speakCooldown</strong> reset formula: <code>Math.max(0, Math.floor(6 / socialStat) + rnd(2))</code><br>
-        &rarr; socialStat=1: 6–7 ticks &nbsp;|&nbsp; socialStat=5: 1–2 ticks &nbsp;|&nbsp; socialStat=10: 0–1 ticks (rapid chatter)</li>
+        &rarr; socialStat=1: 6â€“7 ticks &nbsp;|&nbsp; socialStat=5: 1â€“2 ticks &nbsp;|&nbsp; socialStat=10: 0â€“1 ticks (rapid chatter)</li>
       <li>Initial <code>thoughtTimer</code> seeded from <code>thoughtStat</code> at spawn so no two people share the same update cadence from the start.</li>
-      <li><code>socialWeights()</code> now adds <code>socialStat × 4</code> to the talking weight and <code>socialStat × 1.5</code> to hosting weight, so high-social people initiate conversations far more often.</li>
+      <li><code>socialWeights()</code> now adds <code>socialStat Ã— 4</code> to the talking weight and <code>socialStat Ã— 1.5</code> to hosting weight, so high-social people initiate conversations far more often.</li>
       <li>Post-conversation relation-thought timers also scale by the individual's <code>thoughtStat</code>.</li>
     </ul>
 
     <h3>Tooltip display</h3>
     <p>Hovering a person now shows both stats as 10-pip dot bars:</p>
-    <pre>💭 Thought  ●●●●●●●○○○  7/10
-💬 Social   ●●○○○○○○○○  2/10</pre>
+    <pre>ðŸ’­ Thought  â—â—â—â—â—â—â—â—‹â—‹â—‹  7/10
+ðŸ’¬ Social   â—â—â—‹â—‹â—‹â—‹â—‹â—‹â—‹â—‹  2/10</pre>
 
     <h3>Files changed</h3>
     <ul>
@@ -1088,7 +1088,7 @@ content: '\2600\FE0F'; /* ☀️ U+2600 + variation selector */</pre>
 
 <hr>
 
-<!-- ══════════════════════════════════════════════ TURN 21 ═══ -->
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TURN 21 â•â•â• -->
 <h2>Turn 21 &mdash; Natural, desynchronised thought &amp; speech timing</h2>
 <div class="turn">
   <div class="turn-user">
@@ -1120,8 +1120,8 @@ content: '\2600\FE0F'; /* ☀️ U+2600 + variation selector */</pre>
     </p>
     <ul>
       <li><code>nextThoughtAt</code> &mdash; ms timestamp when this person next generates a thought.
-        Checked and updated in <code>gameLoop()</code> (~60&thinsp;fps) so precision is ±16&thinsp;ms,
-        not ±2200&thinsp;ms.</li>
+        Checked and updated in <code>gameLoop()</code> (~60&thinsp;fps) so precision is Â±16&thinsp;ms,
+        not Â±2200&thinsp;ms.</li>
       <li><code>nextSpeakAt</code> &mdash; ms timestamp when this person can next say a line.
         Checked in <code>tick()</code> via <code>Date.now() &gt;= p.nextSpeakAt</code>.</li>
     </ul>
@@ -1173,15 +1173,15 @@ content: '\2600\FE0F'; /* ☀️ U+2600 + variation selector */</pre>
       </div>
 
       <div class="turn">
-        <div class="user">Add a store that sells fruit. Apples are $1, oranges are $10. People start with 0–20 dollars. Some people (orange lovers) are obsessed with oranges, will go into debt, and will steal from others at night. Witnesses remember thefts. Victims observe spending to build suspicion. People share opinions during gossip. Murderer targets most-suspicious people. Pause support. Enhanced hover tooltip.</div>
+        <div class="user">Add a store that sells fruit. Apples are $1, oranges are $10. People start with 0â€“20 dollars. Some people (orange lovers) are obsessed with oranges, will go into debt, and will steal from others at night. Witnesses remember thefts. Victims observe spending to build suspicion. People share opinions during gossip. Murderer targets most-suspicious people. Pause support. Enhanced hover tooltip.</div>
         <div class="assistant">
           <p>Implemented a comprehensive fruit store economy across 7 files + 1 new file:</p>
           <ul>
             <li><span class="tag">JS</span> <code>constants.js</code> &mdash; added <code>APPLE_PRICE=1</code>, <code>ORANGE_PRICE=10</code>, <code>ORANGE_LOVER_CHANCE</code> per personality, <code>shopping</code> added to all activity tables (ACTIVITY_WEIGHTS, ACTIVITY_TICKS, MOOD_MATRIX, ACTIVITY_EMOJI), plus new dialogue arrays: SHOP_LINES, ORANGE_BUY_LINES, THEFT_WITNESS_LINES, VICTIM_REACT_LINES, OPINION_SHARE_LINES_POS/NEG</li>
             <li><span class="tag">JS</span> <code>state.js</code> &mdash; added <code>state.store</code> position object</li>
-            <li><span class="tag">JS</span> <code>people.js</code> &mdash; added money (0–20), apples, oranges, debt, orangeLover flag, stolenFrom, stolenAmount, witnessedThefts[], spendingObserved{} to each person; orange lovers get boosted shopping weights</li>
+            <li><span class="tag">JS</span> <code>people.js</code> &mdash; added money (0â€“20), apples, oranges, debt, orangeLover flag, stolenFrom, stolenAmount, witnessedThefts[], spendingObserved{} to each person; orange lovers get boosted shopping weights</li>
             <li><span class="tag">JS</span> <code>helpers.js</code> &mdash; added store building (SVG) centred in the park inside the cul-de-sac; <code>culdesacLayout()</code> now returns storeCX/CY/doorX/doorY</li>
-            <li><span class="tag">JS</span> <code>store.js</code> (NEW) &mdash; <code>buyFruit()</code> handles apple/orange purchases with optional debt for orange lovers; <code>processNightThefts()</code> runs at dawn — orange lovers who can't afford oranges steal from disliked neighbours; witnesses gain suspicion</li>
+            <li><span class="tag">JS</span> <code>store.js</code> (NEW) &mdash; <code>buyFruit()</code> handles apple/orange purchases with optional debt for orange lovers; <code>processNightThefts()</code> runs at dawn â€” orange lovers who can't afford oranges steal from disliked neighbours; witnesses gain suspicion</li>
             <li><span class="tag">JS</span> <code>phases.js</code> &mdash; triggerDawn now calls processNightThefts and reacts: victims get outrage messages, suspects via spendingObserved; murderVictim prefers those who most suspect the murderer; pickDebateSuspect makes murderer reinforce existing suspicions of innocents</li>
             <li><span class="tag">JS</span> <code>simulation.js</code> &mdash; shopping activity: person walks to store, buys fruit on arrival, nearby observers record spending; _maybeShareOpinion() gossips about third parties at end of conversations, nudging listener's relations; store position set from layout</li>
             <li><span class="tag">JS</span> <code>rendering.js</code> &mdash; tooltip now shows money/debt, fruit counts, orange lover status, top suspect, vote history, witnessed thefts, per-person suspicion scores; shopping activity tracked in stats bar</li>
@@ -1190,27 +1190,57 @@ content: '\2600\FE0F'; /* ☀️ U+2600 + variation selector */</pre>
         </div>
       </div>
 
-      <!-- ═══════ Turn 20 ═══════ -->
+      <!-- â•â•â•â•â•â•â• Turn 20 â•â•â•â•â•â•â• -->
       <div class="turn">
         <div class="turn-header">
           <span class="turn-num">Turn 20</span>
-          <span class="turn-title">Rename PeopleWatcher → GatorGazing + "Swamp of Salem" title</span>
+          <span class="turn-title">Rename PeopleWatcher â†’ SwampOfSalem + "Swamp of Salem" title</span>
         </div>
         <div class="turn-body">
-          <p><strong>Request:</strong> Change all instances of PeopleWatcher (including file/folder names) to GatorGazing. Site title should be "Swamp of Salem".</p>
+          <p><strong>Request:</strong> Change all instances of PeopleWatcher (including file/folder names) to SwampOfSalem. Site title should be "Swamp of Salem".</p>
           <p><strong>Changes:</strong></p>
           <ul>
-            <li>Renamed folder <code>PeopleWatcher.Blazor</code> → <code>GatorGazing.Blazor</code></li>
-            <li>Renamed <code>PeopleWatcher.Blazor.csproj</code> → <code>GatorGazing.Blazor.csproj</code></li>
-            <li>Renamed <code>PeopleWatcher.slnx</code> → <code>GatorGazing.slnx</code></li>
-            <li>Renamed <code>people-watcher.css</code> → <code>gator-gazing.css</code></li>
-            <li>Updated namespaces in <code>Program.cs</code> and <code>_Imports.razor</code> from PeopleWatcher.Blazor → GatorGazing.Blazor</li>
-            <li>Updated <code>index.html</code>: title → "Swamp of Salem", CSS link → gator-gazing.css</li>
-            <li>Updated <code>Home.razor</code>: PageTitle → "Swamp of Salem", header → "🐊 Swamp of Salem"</li>
-            <li>Updated <code>NavMenu.razor</code>: brand → "Swamp of Salem"</li>
+            <li>Renamed folder <code>PeopleWatcher.Blazor</code> â†’ <code>SwampOfSalem.Blazor</code></li>
+            <li>Renamed <code>PeopleWatcher.Blazor.csproj</code> â†’ <code>SwampOfSalem.Blazor.csproj</code></li>
+            <li>Renamed <code>PeopleWatcher.slnx</code> â†’ <code>SwampOfSalem.slnx</code></li>
+            <li>Renamed <code>people-watcher.css</code> â†’ <code>gator-gazing.css</code></li>
+            <li>Updated namespaces in <code>Program.cs</code> and <code>_Imports.razor</code> from PeopleWatcher.Blazor â†’ SwampOfSalem.Blazor</li>
+            <li>Updated <code>index.html</code>: title â†’ "Swamp of Salem", CSS link â†’ gator-gazing.css</li>
+            <li>Updated <code>Home.razor</code>: PageTitle â†’ "Swamp of Salem", header â†’ "ðŸŠ Swamp of Salem"</li>
+            <li>Updated <code>NavMenu.razor</code>: brand â†’ "Swamp of Salem"</li>
             <li>Updated <code>.slnx</code> project path reference</li>
             <li>Build verified successful</li>
           </ul>
+        </div>
+      </div>
+
+      <div class="turn">
+        <div class="turn-user">
+          <div class="role role-user">User</div>
+          <p>Instead of calling back and forth for a conversation, send the alligators IDs, who initiated the talking, and what they said. Send that to the AI but have the AI complete the conversation between the two of them, going back and forth behind the scenes. Return the full conversation (array of speech/thought) to the front end. Front end should cycle through the conversation items and make it appear as though the gators are chatting back and forth - up to 9 times.</p>
+        </div>
+        <div class="turn-assistant">
+          <div class="role role-copilot">GitHub Copilot</div>
+          <p>Implemented a <strong>single-call full conversation</strong> flow. Instead of firing one AI request per line during an ongoing chat, when two gators start talking:</p>
+          <ol>
+            <li>The front end fires <strong>one</strong> call (<code>requestFullConversation</code>) with both gator IDs, the initiator ID, and the opening line.</li>
+            <li>The C# backend (<code>GetFullConversation</code> in <code>AgentInterop</code>) calls <code>GenerateFullConversationAsync</code> on <code>GatorAgentService</code>.</li>
+            <li>The AI receives a structured prompt describing both gators' personalities &amp; relationship, plus the opening line, and returns a <strong>JSON array of up to 9 turns</strong> â€” each with <code>speakerId</code>, <code>spoken</code>, and <code>thought</code>.</li>
+            <li>The full array is returned to the JS front end and stored on the initiator person object (<code>_convTurns</code>).</li>
+            <li>A <code>_drainNextConvTurn</code> timer fires every 2.2â€“4 s, advancing the queue and updating each gator's speech bubble, making it <em>appear</em> as though they are chatting back and forth live.</li>
+            <li>Per-tick <code>requestDialog</code> calls are suppressed while a full-conversation queue is draining.</li>
+          </ol>
+          <p><strong>Files changed:</strong></p>
+          <ul>
+            <li><code>SwampOfSalem.Shared/DTOs/ChatConversationRequest.cs</code> â€” new DTO (initiatorId, responderId, openingLine, maxTurns, context)</li>
+            <li><code>SwampOfSalem.Shared/DTOs/ChatConversationResponse.cs</code> â€” new DTO with <code>List&lt;ConversationTurn&gt;</code> (speakerId, spoken, thought)</li>
+            <li><code>SwampOfSalem.SK/Agents/GatorAgentService.cs</code> â€” added <code>GenerateFullConversationAsync</code> + <code>ParseConversationTurns</code></li>
+            <li><code>SwampOfSalem.Blazor/Interop/AgentInterop.cs</code> â€” added <code>[JSInvokable] GetFullConversation</code></li>
+            <li><code>SwampOfSalem.Blazor/wwwroot/js/agentBridge.js</code> â€” added <code>getFullConversation</code></li>
+            <li><code>SwampOfSalem.Blazor/wwwroot/js/agentQueue.js</code> â€” added <code>requestFullConversation</code> &amp; <code>drainNextConvTurn</code></li>
+            <li><code>SwampOfSalem.Blazor/wwwroot/js/simulation.js</code> â€” replaced per-line calls at conversation start; suppressed per-tick calls when queue is active</li>
+          </ul>
+          <p>Build verified successful.</p>
         </div>
       </div>
 

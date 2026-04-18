@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SemanticKernel" Version="1.54.0" />
+    <PackageReference Include="Microsoft.SemanticKernel.Agents.Core" Version="1.54.0" />
+    <PackageReference Include="Microsoft.SemanticKernel.Core" Version="1.71.0" />
+    <PackageReference Include="System.ClientModel" Version="1.5.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SwampOfSalem.Shared\SwampOfSalem.Shared.csproj" />
+    <ProjectReference Include="..\SwampOfSalem.AppLogic\SwampOfSalem.AppLogic.csproj" />
+  </ItemGroup>
+</Project>
