@@ -12,40 +12,35 @@ export const rndTicks = a => { const [mn,mx] = ACTIVITY_TICKS[a]; return mn + rn
 
 
 // ── Topics & opinions ─────────────────────────────────────────
-// All alligators are given opinions on a random subset of these swamp topics.
-// Opinions are -100 (strongly disagree/dislike) to +100 (strongly agree/like).
+// The four conversation topics gators discuss while socialising.
+// Sports: Rockets and Jets are the local teams; Chowda fans are out-of-towners
+// looked down upon by Rockets/Jets fans.
 export const TOPICS = [
-    'mud wallowing',
-    'fish tacos',
-    'loud splashing',
-    'sharing territory',
-    'napping in sunbeams',
-    'strangers near the nest',
-    'hunting at dawn',
-    'swamp gossip',
-    'sunbathing on rocks',
-    'trusting outsiders',
-    'long swims',
-    'tall grass hiding spots',
-    'the old ways',
-    'new arrivals in the swamp',
-    'cooperation over competition',
-    'hoarding fish',
-    'loud singing at night',
-    'clean water vs murky water',
-    'settling disputes with a duel',
+    'sports_team',              // Rockets, Jets, or Chowda (out-of-town)
+    'local_gossip',             // sharing rumours and opinions about others
+    'swamp_leadership',         // whether they trust / like the swamp's leadership
+    'favorite_swamp_activity',  // what they love most to do in the swamp
 ];
 
+// Readable labels for UI display
+export const TOPIC_LABELS = {
+    sports_team:             '🏈 Sports Team',
+    local_gossip:            '🗣️ Local Gossip',
+    swamp_leadership:        '👑 Swamp Leadership',
+    favorite_swamp_activity: '🌿 Favorite Swamp Activity',
+};
+
+// Sports team affiliation constants
+export const SPORTS_TEAMS = ['Rockets', 'Jets', 'Chowda'];
+
 /**
- * Generate a random opinion set for a new alligator.
+ * Generate a random opinion set for a new alligator across all 4 topics.
  * Returns an object: { topic: opinionValue, ... }
- * Picks 6–10 topics; opinions are personality-influenced.
+ * Opinions are personality-influenced.
  * @param {string} personality
  * @returns {Object.<string,number>}
  */
 export function generateTopicOpinions(personality) {
-    const count = 6 + rnd(5); // 6–10 topics
-    const shuffled = [...TOPICS].sort(() => Math.random() - 0.5).slice(0, count);
     const opinions = {};
 
     // Personality-based bias: cheerful → positive lean, grumpy → negative lean, etc.
@@ -58,19 +53,24 @@ export function generateTopicOpinions(personality) {
         neutral:    0,
     }[personality] ?? 0;
 
-    for (const topic of shuffled) {
-        // Raw random –100..100, shifted by personality bias, clamped
-        const raw = (Math.random() * 200 - 100) + bias * (0.5 + Math.random() * 0.5);
-        opinions[topic] = Math.max(-100, Math.min(100, Math.round(raw)));
+    for (const topic of TOPICS) {
+        if (topic === 'sports_team') {
+            // Rockets and Jets are local (common); Chowda fans are out-of-towners (~15%).
+            const roll = Math.random();
+            opinions.sports_team = roll < 0.42 ? 'Rockets' : roll < 0.85 ? 'Jets' : 'Chowda';
+        } else {
+            const raw = (Math.random() * 200 - 100) + bias * (0.5 + Math.random() * 0.5);
+            opinions[topic] = Math.max(-100, Math.min(100, Math.round(raw)));
+        }
     }
     return opinions;
 }
 
 /**
  * Compute a compatibility score [-100, 100] between two alligators based on
- * shared topic opinions.  Topics only in one alligator's set are ignored.
- * @param {Object.<string,number>} opinionsA
- * @param {Object.<string,number>} opinionsB
+ * shared topic opinions.  Handles both numeric opinions and sports_team string.
+ * @param {Object} opinionsA
+ * @param {Object} opinionsB
  * @returns {number}
  */
 export function topicCompatibility(opinionsA, opinionsB) {
@@ -78,7 +78,9 @@ export function topicCompatibility(opinionsA, opinionsB) {
     if (shared.length === 0) return 0;
 
     const total = shared.reduce((sum, t) => {
-        // –100 if diametrically opposed, +100 if identical
+        if (t === 'sports_team') {
+            return sum + _sportsTeamCompat(opinionsA[t], opinionsB[t]);
+        }
         const diff = Math.abs(opinionsA[t] - opinionsB[t]); // 0–200
         return sum + (100 - diff); // maps to –100..100
     }, 0);
@@ -86,16 +88,98 @@ export function topicCompatibility(opinionsA, opinionsB) {
     return Math.round(total / shared.length);
 }
 
+/** Sports team compatibility: same team = +80, local vs Chowda = –60, Jets vs Rockets = –10 */
+function _sportsTeamCompat(teamA, teamB) {
+    if (teamA === teamB) return 80;
+    const chowda = teamA === 'Chowda' || teamB === 'Chowda';
+    return chowda ? -60 : -10;
+}
+
+/**
+ * Apply a relation delta between two gators based on how their topic opinions aligned
+ * during a hosting conversation. Call this after the conversation finishes.
+ * @param {object} a - gator
+ * @param {object} b - gator
+ * @returns {{ delta: number, reasons: string[] }} delta applied to both, and human-readable reasons
+ */
+export function applyTopicRelationDelta(a, b) {
+    const ao = a.topicOpinions ?? {};
+    const bo = b.topicOpinions ?? {};
+    let delta = 0;
+    const reasons = [];
+
+    // Sports team
+    if (ao.sports_team && bo.sports_team) {
+        const sc = _sportsTeamCompat(ao.sports_team, bo.sports_team);
+        const contribution = Math.round(sc * 0.15); // –9 to +12
+        delta += contribution;
+        if (ao.sports_team === bo.sports_team) {
+            reasons.push(`Both support the ${ao.sports_team}! (+${contribution})`);
+        } else if (ao.sports_team === 'Chowda' || bo.sports_team === 'Chowda') {
+            const chowdaFan = ao.sports_team === 'Chowda' ? a.name : b.name;
+            reasons.push(`${chowdaFan} is a Chowda fan — locals aren't impressed. (${contribution})`);
+        } else {
+            reasons.push(`${a.name} roots for ${ao.sports_team}, ${b.name} for ${bo.sports_team}. (${contribution})`);
+        }
+    }
+
+    // Local gossip — sharing gossip is bonding if both are gossipy (high or low opinion values)
+    if (ao.local_gossip !== undefined && bo.local_gossip !== undefined) {
+        const diff = Math.abs(ao.local_gossip - bo.local_gossip);
+        const contribution = Math.round((100 - diff) * 0.08); // –8 to +8
+        delta += contribution;
+        if (Math.abs(contribution) >= 3) {
+            reasons.push(contribution >= 0
+                ? `Enjoyed swapping gossip together. (+${contribution})`
+                : `Disagreed about sharing gossip. (${contribution})`);
+        }
+    }
+
+    // Swamp leadership — strong shared opinions bond; opposing split
+    if (ao.swamp_leadership !== undefined && bo.swamp_leadership !== undefined) {
+        const sameSign = Math.sign(ao.swamp_leadership) === Math.sign(bo.swamp_leadership);
+        const strength = (Math.abs(ao.swamp_leadership) + Math.abs(bo.swamp_leadership)) / 2;
+        const contribution = Math.round((sameSign ? 1 : -1) * strength * 0.1);
+        delta += contribution;
+        if (Math.abs(contribution) >= 3) {
+            reasons.push(sameSign
+                ? `Agree on swamp leadership. (+${contribution})`
+                : `Disagree on swamp leadership. (${contribution})`);
+        }
+    }
+
+    // Favorite swamp activity — shared passion bonds; indifference neutral
+    if (ao.favorite_swamp_activity !== undefined && bo.favorite_swamp_activity !== undefined) {
+        const diff = Math.abs(ao.favorite_swamp_activity - bo.favorite_swamp_activity);
+        const contribution = Math.round((100 - diff) * 0.06); // –6 to +6
+        delta += contribution;
+        if (Math.abs(contribution) >= 3) {
+            reasons.push(contribution >= 0
+                ? `Share a love of swamp activities. (+${contribution})`
+                : `Different tastes for swamp fun. (${contribution})`);
+        }
+    }
+
+    // Apply to both gators, clamped
+    a.relations[b.id] = Math.max(-100, Math.min(100, (a.relations[b.id] ?? 0) + delta));
+    b.relations[a.id] = Math.max(-100, Math.min(100, (b.relations[a.id] ?? 0) + delta));
+    a.perceivedRelations[b.id] = a.relations[b.id];
+    b.perceivedRelations[a.id] = b.relations[a.id];
+
+    return { delta, reasons };
+}
+
 /**
  * Build a human-readable summary of an alligator's topic opinions for the AI.
- * @param {Object.<string,number>} opinions
+ * @param {Object} opinions
  * @returns {string}
  */
 export function topicOpinionSummary(opinions) {
     return Object.entries(opinions)
         .map(([topic, val]) => {
+            if (topic === 'sports_team') return `supports ${val}`;
             const label = val >= 60 ? 'loves' : val >= 20 ? 'likes' : val >= -20 ? 'is neutral about' : val >= -60 ? 'dislikes' : 'hates';
-            return `${label} ${topic}`;
+            return `${label} ${topic.replace(/_/g, ' ')}`;
         })
         .join('; ');
 }

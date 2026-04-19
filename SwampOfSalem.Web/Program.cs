@@ -105,6 +105,21 @@ api.MapPost("/memory", (MemoryRequest request, GatorAgentService agents) =>
     return Results.Ok();
 });
 
+api.MapPost("/memory/batch", (MemoryBatchRequest request, GatorAgentService agents) =>
+{
+    foreach (var entry in request.Entries)
+    {
+        agents.AddMemory(request.AlligatorId, new MemoryEntry
+        {
+            Day = entry.Day,
+            Type = entry.Type,
+            Detail = entry.Detail,
+            RelatedAlligatorId = entry.RelatedId
+        });
+    }
+    return Results.Ok();
+});
+
 api.MapPost("/night-report", async (NightReportRequest request, GatorAgentService agents) =>
 {
     try
@@ -123,17 +138,19 @@ api.MapPost("/conversation", async (ChatConversationRequest request, GatorAgentS
 {
     try
     {
+        Console.WriteLine($"[API /conversation] Request: initiator={request.InitiatorId}, responder={request.ResponderId}, maxTurns={request.MaxTurns}");
         var response = await agents.GenerateFullConversationAsync(request);
+        Console.WriteLine($"[API /conversation] Response: {response.Messages.Count} messages");
         return Results.Ok(response);
     }
     catch (Exception ex)
     {
-        Console.Error.WriteLine($"GenerateFullConversation failed: {ex.Message}");
+        Console.Error.WriteLine($"GenerateFullConversation failed: {ex.Message}\n{ex.StackTrace}");
         return Results.Ok(new ChatConversationResponse
         {
             InitiatorId = request.InitiatorId,
             ResponderId = request.ResponderId,
-            Turns = [new ConversationTurn { SpeakerId = request.InitiatorId, Spoken = request.OpeningLine }]
+            Messages = [new ConversationMessage { Conversation = 1, MessageId = 1, Order = 1, SpeakerGatorId = request.InitiatorId, SpeakingToGatorId = request.ResponderId, Speech = request.OpeningLine }]
         });
     }
 });
@@ -284,5 +301,7 @@ app.Run();
 // â”€â”€ Request DTOs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 record MemoryRequest(int AlligatorId, int Day, string Type, string Detail, int? RelatedId);
+record MemoryBatchEntry(int Day, string Type, string Detail, int? RelatedId);
+record MemoryBatchRequest(int AlligatorId, List<MemoryBatchEntry> Entries);
 record TestChatRequest(List<TestChatMessage> Messages);
 record TestChatMessage(bool IsUser, string Text);

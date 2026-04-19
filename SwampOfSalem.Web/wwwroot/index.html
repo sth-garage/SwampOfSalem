@@ -92,6 +92,7 @@
                         <button class="btn-primary" id="startGameBtn">▶ Start Game</button>
                         <button class="btn-secondary" id="testAiBtn">🔌 Test AI Connection</button>
                         <button class="btn-secondary" id="getGatorBtn">🐊 Get Gator</button>
+                        <button class="btn-secondary" id="testConvSplashBtn">🧪 Test Conversation</button>
                     </div>
                 </div>
                 <div id="splash-test" style="display:none">
@@ -131,6 +132,8 @@
                 <button id="respawnBtn">↺ Respawn</button>
                 <button id="pauseBtn" class="secondary">⏸ Pause</button>
                 <button id="dialogModeBtn" class="secondary" title="Toggle between AI Agent dialog and local JS dialog">🤖 AI</button>
+                <button id="skipAiTurnsBtn" class="secondary" title="After the first AI line, skip remaining AI turns in a conversation">⏭ Skip AI turns: OFF</button>
+                <button id="testConvBtn" class="secondary" title="Two random gators have a test conversation">🧪 Test Conversation</button>
             </div>
             <div id="stats"></div>
             <div id="nightfall-timer" class="nightfall-timer"></div>
@@ -169,18 +172,6 @@
             <div class="nr-footer">
                 <button id="nr-continue-btn" class="nr-continue-btn">☀️ Continue to Morning</button>
             </div>
-        </div>
-    </div>
-
-    <!-- AI Call Modal -->
-    <div id="ai-modal" class="ai-modal-overlay" style="display:none">
-        <div class="ai-modal-card">
-            <div class="ai-modal-title" id="ai-modal-title">🤖 Asking AI…</div>
-            <div class="ai-modal-speaker" id="ai-modal-speaker"></div>
-            <div class="ai-modal-status" id="ai-modal-status">Waiting for response…</div>
-            <div class="ai-modal-result" id="ai-modal-result" style="display:none"></div>
-            <div class="ai-modal-thought" id="ai-modal-thought" style="display:none"></div>
-            <button class="ai-modal-ok" id="ai-modal-ok" style="display:none">🔊 OK — Say it aloud</button>
         </div>
     </div>
 
@@ -225,6 +216,20 @@
         document.getElementById('test-back-btn').addEventListener('click', () => {
             document.getElementById('splash-test').style.display = 'none';
             document.getElementById('splash-main').style.display = 'block';
+        });
+
+        // Test Conversation button — starts game then triggers a test conversation
+        document.getElementById('testConvSplashBtn').addEventListener('click', async () => {
+            const cfgResp = await fetch('/api/game-config');
+            window.GameConfig = await cfgResp.json();
+
+            document.getElementById('splash').style.display = 'none';
+            const dialogSource = configData?.dialogSource ?? 'AI';
+
+            const { initSimulation, testConversation } = await import('./js/main.js?v=2');
+            initSimulation(null, dialogSource);
+            // Wait for gators to spawn before triggering the conversation
+            setTimeout(() => testConversation(), 2000);
         });
 
         // Get Gator button

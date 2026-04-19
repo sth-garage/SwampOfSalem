@@ -51,19 +51,28 @@ export async function getAgentVote(alligatorId, candidateIds, debateSummary) {
 }
 
 /**
- * Record a memory/observation for an agent.
+ * addAgentMemory is intentionally a no-op — memories are now buffered locally
+ * and flushed in batch via flushMemories() when a conversation starts.
  */
-export async function addAgentMemory(alligatorId, day, type, detail, relatedId) {
+export function addAgentMemory() { /* buffered locally — see agentQueue.recordMemory */ }
+
+/**
+ * Flush all buffered memories for one alligator to the server in a single request.
+ * @param {number} alligatorId
+ * @param {Array<{day,type,detail,relatedId}>} entries
+ */
+export async function flushMemories(alligatorId, entries) {
+    if (!entries || entries.length === 0) return;
     try {
-        const payload = { alligatorId, day, type, detail, relatedId };
-        console.log(`[AGENT ➡️ SEND] memory`, payload);
-        await fetch('/api/agent/memory', {
+        const payload = { alligatorId, entries };
+        console.log(`[AGENT ➡️ SEND] memory/batch (${entries.length} entries) for gator ${alligatorId}`);
+        await fetch('/api/agent/memory/batch', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
     } catch (e) {
-        console.warn('Agent memory failed:', e);
+        console.warn('Agent memory batch failed:', e);
     }
 }
 
@@ -81,8 +90,9 @@ export async function getFullConversation(initiatorId, responderId, openingLine,
             body: JSON.stringify(payload)
         });
         const data = await resp.json();
-        console.log(`[AGENT ⬅️ RECV] conversation turns:`, data.turns);
-        return data.turns ?? [];
+        console.log(`[AGENT ⬅️ RECV] full response:`, JSON.stringify(data));
+        console.log(`[AGENT ⬅️ RECV] conversation messages (${(data.messages ?? []).length}):`, data.messages);
+        return data.messages ?? [];
     } catch (e) {
         console.warn('Agent conversation failed:', e);
         return [];

@@ -29,18 +29,35 @@ export function updatePhaseLabel() {
     const timerEl = document.getElementById('nightfall-timer');
     if (timerEl) {
         if (state.gamePhase === PHASE.DAY && state.cycleTimer > 0) {
-            const secsLeft = Math.ceil(state.cycleTimer * TICK_MS / 1000);
-            const mins = Math.floor(secsLeft / 60);
-            const secs = secsLeft % 60;
-            timerEl.textContent = `\u{1F319} Nightfall in ${mins}:${secs.toString().padStart(2, '0')}`;
-            timerEl.classList.add('visible');
-            // Warn color when close to nightfall
-            if (state.cycleTimer <= HOME_WARN_TICKS) {
-                timerEl.style.color = '#ff6040';
-                timerEl.style.borderColor = 'rgba(200,60,40,.4)';
+            if (state.dayEndTimerActive && state.dayEndTimerExpiresAt > 0) {
+                // Show the 1-minute conversation-limit countdown
+                const msLeft = Math.max(0, state.dayEndTimerExpiresAt - Date.now());
+                if (state.noNewConversations) {
+                    timerEl.textContent = `🌙 Night coming — finishing conversations…`;
+                    timerEl.style.color = '#ff6040';
+                    timerEl.style.borderColor = 'rgba(200,60,40,.4)';
+                } else {
+                    const secsLeft = Math.ceil(msLeft / 1000);
+                    const mins = Math.floor(secsLeft / 60);
+                    const secs = secsLeft % 60;
+                    timerEl.textContent = `🌙 Night in ${mins}:${secs.toString().padStart(2, '0')} (no new conversations after)`;
+                    timerEl.style.color = secsLeft <= 10 ? '#ff6040' : '';
+                    timerEl.style.borderColor = secsLeft <= 10 ? 'rgba(200,60,40,.4)' : '';
+                }
+                timerEl.classList.add('visible');
             } else {
-                timerEl.style.color = '';
-                timerEl.style.borderColor = '';
+                const secsLeft = Math.ceil(state.cycleTimer * TICK_MS / 1000);
+                const mins = Math.floor(secsLeft / 60);
+                const secs = secsLeft % 60;
+                timerEl.textContent = `\u{1F319} Nightfall in ${mins}:${secs.toString().padStart(2, '0')}`;
+                timerEl.classList.add('visible');
+                if (state.cycleTimer <= HOME_WARN_TICKS) {
+                    timerEl.style.color = '#ff6040';
+                    timerEl.style.borderColor = 'rgba(200,60,40,.4)';
+                } else {
+                    timerEl.style.color = '';
+                    timerEl.style.borderColor = '';
+                }
             }
         } else {
             timerEl.classList.remove('visible');
@@ -171,11 +188,28 @@ export function renderGator(p) {
             bubble = document.createElement('div');
             bubble.id        = `bubble-${p.id}`;
             bubble.className = 'chat-bubble';
-            bubble.style.left = `${p.x + GATOR_SIZE / 2 - 20}px`;
-            bubble.style.top  = `${p.y - 38}px`;
             document.getElementById('world').appendChild(bubble);
             state.bubbles.set(p.id, bubble);
         }
+
+        // Offset bubbles vertically so conversing pairs don't overlap
+        let bubbleOffsetY = -38;
+        if (p.talkingTo != null) {
+            const partner = state.gators.find(q => q.id === p.talkingTo);
+            if (partner) {
+                const dy = p.y - partner.y;
+                if (Math.abs(dy) < 60) {
+                    // Gators at similar height — stagger by id order
+                    bubbleOffsetY = p.id < partner.id ? -78 : -38;
+                } else {
+                    // The higher gator gets the higher bubble
+                    bubbleOffsetY = dy < 0 ? -78 : -38;
+                }
+            }
+        }
+
+        bubble.style.left = `${p.x + GATOR_SIZE / 2 - 20}px`;
+        bubble.style.top  = `${p.y + bubbleOffsetY}px`;
         if (p.isWaiting && !p.message) {
             // Show animated dots while waiting for AI response
             if (!bubble.querySelector('.bubble-waiting')) {
@@ -351,6 +385,23 @@ function _renderPanel(p) {
                 <span class="chat-speaker">\uD83D\uDC42 Overheard ${fromP?.name ?? '?'} → ${toP?.name ?? '?'}</span>
                 ${entry.message}
             </div>`;
+        }
+        if (entry.type === 'private') {
+            const isSelf = entry.from === p.id;
+            const cls = isSelf ? 'chat-entry-self' : 'chat-entry-other';
+            const speaker = fromP?.name ?? '?';
+            const target = toP ? ` → ${toP.name}` : '';
+            let html = `<div class="chat-entry ${cls} chat-entry-private">
+                <span class="chat-speaker">🏠 ${speaker}${target} <span class="chat-private-badge">(private)</span></span>
+                ${entry.message || ''}
+            </div>`;
+            if (isSelf && entry.thought) {
+                html += `<div class="chat-entry chat-entry-thought">
+                    <span class="chat-speaker">\uD83D\uDCAD What I was really thinking...</span>
+                    ${entry.thought}
+                </div>`;
+            }
+            return html;
         }
         const isSelf = entry.from === p.id;
         const cls = isSelf ? 'chat-entry-self' : 'chat-entry-other';

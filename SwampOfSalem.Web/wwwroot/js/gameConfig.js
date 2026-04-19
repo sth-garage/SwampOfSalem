@@ -10,6 +10,8 @@ if (!G) throw new Error('window.GameConfig must be set before importing gameConf
 // ── Scalars ───────────────────────────────────────────────────
 export const GATOR_SIZE           = G.GATOR_SIZE;
 export const GATOR_COUNT          = G.GATOR_COUNT;
+export const CONV_LIMIT_FOR_NIGHTFALL = G.CONV_LIMIT_FOR_NIGHTFALL;
+export const NIGHTFALL_DELAY_MS   = G.NIGHTFALL_DELAY_MS;
 export const TICK_MS               = G.TICK_MS;
 export const TALK_DIST             = G.TALK_DIST;
 export const TALK_STOP             = G.TALK_STOP;

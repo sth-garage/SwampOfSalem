@@ -402,7 +402,19 @@ public class GatorAgentService
         var responder = _gameState.Alligators.FirstOrDefault(a => a.Id == request.ResponderId);
 
         if (initiator is null || responder is null)
-            return new ChatConversationResponse { InitiatorId = request.InitiatorId, ResponderId = request.ResponderId };
+        {
+            Console.Error.WriteLine($"[Conversation] Agent not found: initiator({request.InitiatorId})={initiator?.Name ?? "NULL"}, responder({request.ResponderId})={responder?.Name ?? "NULL"}. Returning fallback.");
+            return new ChatConversationResponse
+            {
+                InitiatorId = request.InitiatorId,
+                ResponderId = request.ResponderId,
+                Messages =
+                [
+                    new ConversationMessage { Conversation = 1, MessageId = 1, Order = 1, SpeakerGatorId = request.InitiatorId, SpeakingToGatorId = request.ResponderId, Speech = request.OpeningLine, Thought = "Hope this goes well..." },
+                    new ConversationMessage { Conversation = 1, MessageId = 2, Order = 2, SpeakerGatorId = request.ResponderId, SpeakingToGatorId = request.InitiatorId, Speech = "Hey there!", Thought = "Seems friendly enough." },
+                ]
+            };
+        }
 
         // Use the chat completion service directly for a single structured call
         var chatService = _kernel.GetRequiredService<IChatCompletionService>();
@@ -415,7 +427,7 @@ public class GatorAgentService
         var rel_ir = initiator.Relations.GetValueOrDefault(responder.Id, 0);
         var rel_ri = responder.Relations.GetValueOrDefault(initiator.Id, 0);
 
-        var maxTurns = Math.Clamp(request.MaxTurns, 1, 9);
+        var maxTurns = Math.Clamp(request.MaxTurns, 5, 9);
 
         var systemPrompt = $$"""
             You are a creative writer generating a short swamp alligator conversation.
@@ -430,6 +442,7 @@ public class GatorAgentService
             {{initiator.Name}} has already said: "{{request.OpeningLine}}"
 
             Continue the conversation for up to {{maxTurns}} total turns (including the opening line already spoken).
+            The conversation MUST contain at least 5 messages total — do not end it early.
             Alternate between {{responder.Name}} and {{initiator.Name}}, starting with {{responder.Name}}.
             Keep each line SHORT (1-2 sentences), natural, and in-character.
 
@@ -447,18 +460,21 @@ public class GatorAgentService
         var result = await chatService.GetChatMessageContentAsync(history);
         var raw = result?.Content ?? "[]";
 
-        var turns = ParseConversationTurns(raw, request.InitiatorId, request.OpeningLine, maxTurns);
+        Console.WriteLine($"[Conversation] {initiator.Name} & {responder.Name}: AI returned {raw.Length} chars");
+
+        var messages = ParseConversationMessages(raw, request.InitiatorId, request.ResponderId, request.OpeningLine, maxTurns);
+
+        Console.WriteLine($"[Conversation] Parsed {messages.Count} messages");
 
         // Record memories for both gators
-        foreach (var turn in turns)
+        foreach (var msg in messages)
         {
-            var otherId = turn.SpeakerId == request.InitiatorId ? request.ResponderId : request.InitiatorId;
-            AddMemory(turn.SpeakerId, new MemoryEntry
+            AddMemory(msg.SpeakerGatorId, new MemoryEntry
             {
                 Day = _gameState.DayNumber,
                 Type = "conversation",
-                Detail = $"Said to {_gameState.Alligators.FirstOrDefault(a => a.Id == otherId)?.Name ?? "?"}: \"{turn.Spoken}\"",
-                RelatedAlligatorId = otherId
+                Detail = $"Said to {_gameState.Alligators.FirstOrDefault(a => a.Id == msg.SpeakingToGatorId)?.Name ?? "?"}: \"{msg.Speech}\"",
+                RelatedAlligatorId = msg.SpeakingToGatorId
             });
         }
 
@@ -466,15 +482,15 @@ public class GatorAgentService
         {
             InitiatorId = request.InitiatorId,
             ResponderId = request.ResponderId,
-            Turns = turns
+            Messages = messages
         };
     }
 
-    private static List<ConversationTurn> ParseConversationTurns(string raw, int initiatorId, string openingLine, int maxTurns)
+    private static List<ConversationMessage> ParseConversationMessages(string raw, int initiatorId, int responderId, string openingLine, int maxTurns)
     {
-        var fallback = new List<ConversationTurn>
+        var fallback = new List<ConversationMessage>
         {
-            new() { SpeakerId = initiatorId, Spoken = openingLine }
+            new() { Conversation = 1, MessageId = 1, Order = 1, SpeakerGatorId = initiatorId, SpeakingToGatorId = responderId, Speech = openingLine }
         };
 
         try
@@ -491,17 +507,31 @@ public class GatorAgentService
                 json = json[bracketStart..(bracketEnd + 1)];
 
             using var doc = System.Text.Json.JsonDocument.Parse(json);
-            var turns = new List<ConversationTurn>();
+            var messages = new List<ConversationMessage>();
+            int order = 0;
             foreach (var el in doc.RootElement.EnumerateArray())
             {
-                if (turns.Count >= maxTurns) break;
+                if (messages.Count >= maxTurns) break;
                 var speakerId = el.TryGetProperty("speakerId", out var sid) ? sid.GetInt32() : initiatorId;
                 var spoken = el.TryGetProperty("spoken", out var sp) ? sp.GetString() ?? string.Empty : string.Empty;
                 var thought = el.TryGetProperty("thought", out var th) ? th.GetString() : null;
                 if (!string.IsNullOrWhiteSpace(spoken))
-                    turns.Add(new ConversationTurn { SpeakerId = speakerId, Spoken = spoken, Thought = thought });
+                {
+                    order++;
+                    var listenerId = speakerId == initiatorId ? responderId : initiatorId;
+                    messages.Add(new ConversationMessage
+                    {
+                        Conversation = 1,
+                        MessageId = order,
+                        Order = order,
+                        SpeakerGatorId = speakerId,
+                        SpeakingToGatorId = listenerId,
+                        Thought = thought,
+                        Speech = spoken
+                    });
+                }
             }
-            return turns.Count > 0 ? turns : fallback;
+            return messages.Count > 0 ? messages : fallback;
         }
         catch
         {

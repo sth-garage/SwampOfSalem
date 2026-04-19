@@ -1,61 +1,33 @@
 ﻿// ── Agent Queue ───────────────────────────────────────────────
 // AI is used ONLY for full 2-gator conversations.
-// requestFullConversation() shows a modal while the AI call is in-flight.
-// When OK is clicked the modal hides; after 2 seconds the conversation
-// is played back turn-by-turn on the gator figures.
+// requestFullConversation() sets isWaiting on both gators (showing thinking
+// bubbles) while the AI call is in-flight, then plays back turns automatically.
 
-import { isAgentAvailable, getFullConversation, addAgentMemory, getNightReport } from './agentBridge.js';
+import { isAgentAvailable, getFullConversation, addAgentMemory, getNightReport, flushMemories } from './agentBridge.js';
 import { state } from './state.js';
 import { living } from './gator.js';
+import { logChat } from './simulation.js';
 
 // Track in-flight requests to avoid duplicate calls for the same pair
 const _pending = new Map();
 
-// ── Modal helpers ─────────────────────────────────────────────
-const _modalEl       = () => document.getElementById('ai-modal');
-const _modalTitle    = () => document.getElementById('ai-modal-title');
-const _modalSpeaker  = () => document.getElementById('ai-modal-speaker');
-const _modalStatus   = () => document.getElementById('ai-modal-status');
-const _modalResult   = () => document.getElementById('ai-modal-result');
-const _modalThought  = () => document.getElementById('ai-modal-thought');
-const _modalOk       = () => document.getElementById('ai-modal-ok');
+// Global lock — only one conversation at a time across all gators
+let _conversationInProgress = false;
 
-function _showModalWaiting(initiatorName, responderName) {
-    _modalTitle().textContent   = '🤖 Generating conversation…';
-    _modalSpeaker().textContent = `${initiatorName} & ${responderName}`;
-    _modalStatus().textContent  = 'Asking AI for their conversation…';
-    _modalStatus().style.display  = 'block';
-    _modalResult().style.display  = 'none';
-    _modalThought().style.display = 'none';
-    _modalOk().style.display      = 'none';
-    _modalEl().style.display      = 'flex';
+// ── Local memory buffer ───────────────────────────────────────
+// Memories are stored here and only flushed to the server when a conversation starts.
+const _memoryBuffer = new Map(); // alligatorId → [{day, type, detail, relatedId}, ...]
+
+function _bufferMemory(alligatorId, day, type, detail, relatedId) {
+    if (!_memoryBuffer.has(alligatorId)) _memoryBuffer.set(alligatorId, []);
+    _memoryBuffer.get(alligatorId).push({ day, type, detail, relatedId: relatedId ?? null });
 }
 
-function _showModalReady(turnCount) {
-    _modalTitle().textContent     = '🐊 Conversation ready';
-    _modalStatus().style.display  = 'none';
-    _modalResult().textContent    = `Got ${turnCount} lines. Click OK to watch the conversation.`;
-    _modalResult().style.display  = 'block';
-    _modalThought().style.display = 'none';
-    _modalOk().style.display      = 'block';
-}
-
-function _hideModal() {
-    _modalEl().style.display = 'none';
-}
-
-/** Wait for the user to press OK, then hide the modal and resolve. */
-function _waitForOk(turnCount) {
-    return new Promise(resolve => {
-        _showModalReady(turnCount);
-        const btn = _modalOk();
-        function handler() {
-            btn.removeEventListener('click', handler);
-            _hideModal();
-            resolve();
-        }
-        btn.addEventListener('click', handler);
-    });
+async function _flushMemoriesForGator(alligatorId) {
+    const entries = _memoryBuffer.get(alligatorId);
+    if (!entries || entries.length === 0) return;
+    _memoryBuffer.delete(alligatorId); // clear before sending to avoid re-send on error
+    await flushMemories(alligatorId, entries);
 }
 
 /**
@@ -66,17 +38,20 @@ export function requestDialog() { /* intentionally empty */ }
 
 /**
  * Request a full AI-generated conversation between two gators.
- * Shows a modal while the AI call is in-flight.
- * On OK the modal closes; after 2 seconds the turns are played back.
+ * Both gators show a thinking bubble while the AI call is in-flight.
+ * Turns begin playing back automatically as soon as the response arrives.
  *
  * @param {object} initiator   - Person object for the gator who opened the chat
  * @param {object} responder   - Person object for the other gator
  * @param {string} openingLine - The first line already displayed by the initiator
  * @param {number} maxTurns    - Max turns (1–9)
  * @param {string|null} context
+ * @param {boolean} isPrivate  - If true, conversation is private (hosting); no overhearing
+ * @param {function|null} onComplete - Called after last turn displayed + 3s hold
  */
-export function requestFullConversation(initiator, responder, openingLine, maxTurns = 6, context = null) {
+export async function requestFullConversation(initiator, responder, openingLine, maxTurns = 6, context = null, isPrivate = false, onComplete = null) {
     if (!isAgentAvailable()) return;
+    if (_conversationInProgress) return;
 
     const key = `${Math.min(initiator.id, responder.id)}:${Math.max(initiator.id, responder.id)}:fullconv`;
     if (_pending.has(key)) return;
@@ -85,38 +60,57 @@ export function requestFullConversation(initiator, responder, openingLine, maxTu
     if (initiator._convTurns && initiator._convTurnIndex < initiator._convTurns.length) return;
     if (responder._convTurns && responder._convTurnIndex < responder._convTurns.length) return;
 
-    // Pause simulation while the AI call is in-flight
-    const wasPaused = state.paused;
-    state.paused = true;
+    _conversationInProgress = true;
 
-    _showModalWaiting(initiator.name, responder.name);
+    // Show thinking bubbles on both gators while waiting
+    initiator.isWaiting = true;
+    responder.isWaiting = true;
+
+    // Flush buffered memories for both gators to the server before asking the AI
+    await Promise.all([
+        _flushMemoriesForGator(initiator.id),
+        _flushMemoriesForGator(responder.id),
+    ]);
 
     const promise = getFullConversation(initiator.id, responder.id, openingLine, maxTurns, context)
-        .then(async turns => {
-            if (!turns || turns.length === 0) {
-                _hideModal();
-                if (!wasPaused) state.paused = false;
+        .then(turns => {
+            initiator.isWaiting = false;
+            responder.isWaiting = false;
+
+            if (!turns || turns.length <= 1) {
+                // A single message (greeting) is not a conversation — ignore it
+                console.log(`⏭ Ignoring result with ${turns?.length ?? 0} message(s) — not a real conversation`);
+                _conversationInProgress = false;
+                state.activeConversation = false;
+                initiator.activity = 'moving'; initiator.talkingTo = null; initiator.message = null;
+                responder.activity = 'moving'; responder.talkingTo = null; responder.message = null;
                 return;
             }
 
-            // Wait for user to press OK
-            await _waitForOk(turns.length);
+            // Log all AI output to console
+            const label = isPrivate ? '🏠 [Private AI conv]' : '💬 [AI conv]';
+            console.log(`${label} ${initiator.name} & ${responder.name} (${turns.length} turns):`);
+            turns.forEach((t, i) => {
+                const speaker = t.speakerGatorId === initiator.id ? initiator : responder;
+                console.log(`  [${i + 1}] ${speaker.name}: ${t.speech ?? ''}${t.thought ? ` (💭 ${t.thought})` : ''}`);
+            });
 
-            // Resume the simulation immediately after OK
-            if (!wasPaused) state.paused = false;
-
-            // After 2 s, begin playing back the turns
-            setTimeout(() => {
-                initiator._convTurns      = turns;
-                initiator._convPartner    = responder;
-                initiator._convTurnIndex  = 0;
-                _drainNextConvTurn(initiator, responder);
-            }, 2000);
+            // Start playing back turns immediately
+            initiator._convTurns      = turns;
+            initiator._convPartner    = responder;
+            initiator._convTurnIndex  = 0;
+            initiator._convIsPrivate  = isPrivate;
+            initiator._convOnComplete = onComplete;
+            _drainNextConvTurn(initiator, responder);
         })
         .catch(err => {
             console.error('requestFullConversation failed:', err);
-            _hideModal();
-            if (!wasPaused) state.paused = false;
+            initiator.isWaiting = false;
+            responder.isWaiting = false;
+            _conversationInProgress = false;
+            state.activeConversation = false;
+            initiator.activity = 'moving'; initiator.talkingTo = null; initiator.message = null;
+            responder.activity = 'moving'; responder.talkingTo = null; responder.message = null;
         });
 
     _pending.set(key, promise);
@@ -137,9 +131,28 @@ function _drainNextConvTurn(initiator, responder) {
     if (!turns || initiator._convTurnIndex >= turns.length) return;
 
     const turn = turns[initiator._convTurnIndex++];
-    const speaker = turn.speakerId === initiator.id ? initiator : responder;
-    if (turn.spoken && turn.spoken.length > 0) {
-        speaker.message = turn.spoken;
+    const isPrivate = !!initiator._convIsPrivate;
+
+    // If ignoreSubsequentAiTurns is on, skip all AI-generated turns after the first response
+    // _convTurnIndex was just incremented, so index 0 = opening line, index 1 = first AI response
+    // We want to show the opening line (0) and the first AI response (1), then stop
+    if (state.ignoreSubsequentAiTurns && initiator._convTurnIndex > 2) {
+        const onComplete = initiator._convOnComplete ?? null;
+        initiator._convTurns      = null;
+        initiator._convPartner    = null;
+        initiator._convTurnIndex  = 0;
+        initiator._convIsPrivate  = false;
+        initiator._convOnComplete = null;
+        setTimeout(() => { if (onComplete) onComplete(); }, 3000);
+        return;
+    }
+
+    const speaker = turn.speakerGatorId === initiator.id ? initiator : responder;
+    const listener = turn.speakerGatorId === initiator.id ? responder : initiator;
+    if (turn.speech && turn.speech.length > 0) {
+        speaker.message = turn.speech;
+        // Log to both gators' chatLogs (private = no overhearing)
+        logChat(speaker, listener.id, turn.speech, turn.thought ?? null, isPrivate);
     }
     if (turn.thought) {
         speaker.thought = turn.thought;
@@ -150,19 +163,25 @@ function _drainNextConvTurn(initiator, responder) {
         const ms = 2200 + Math.random() * 1800; // 2.2–4 s between lines
         setTimeout(() => _drainNextConvTurn(initiator, responder), ms);
     } else {
-        // Conversation finished — clean up
-        initiator._convTurns      = null;
-        initiator._convPartner    = null;
-        initiator._convTurnIndex  = 0;
+        // All turns displayed — hold 3 s, then fire onComplete and clean up
+        const onComplete = initiator._convOnComplete ?? null;
+        setTimeout(() => {
+            initiator._convTurns      = null;
+            initiator._convPartner    = null;
+            initiator._convTurnIndex  = 0;
+            initiator._convIsPrivate  = false;
+            initiator._convOnComplete = null;
+            _conversationInProgress = false;
+            if (onComplete) onComplete();
+        }, 3000);
     }
 }
 
 /**
- * Record a memory/event for an agent.
+ * Record a memory/event for an agent — stored locally and flushed when a conversation starts.
  */
 export function recordMemory(alligatorId, day, type, detail, relatedId = null) {
-    if (!isAgentAvailable()) return;
-    addAgentMemory(alligatorId, day, type, detail, relatedId);
+    _bufferMemory(alligatorId, day, type, detail, relatedId);
 }
 
 /**
@@ -197,6 +216,8 @@ export function requestNightReport() {
         if (isAgentAvailable()) {
             try {
                 const aliveIds = living().map(p => p.id);
+                // Flush all buffered memories before the night report
+                await Promise.all(aliveIds.map(id => _flushMemoriesForGator(id)));
                 entries = await getNightReport(aliveIds);
             } catch (e) {
                 console.warn('Night report AI call failed, using fallback:', e);

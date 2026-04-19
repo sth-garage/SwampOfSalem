@@ -8,7 +8,11 @@ public static class GameConstants
 {
     // Sizing
     public const int GatorSize = 120;
-    public const int GatorCount = 2;
+    public const int GatorCount = 7;
+
+    // Conversation limit before nightfall timer
+    public const int ConvLimitForNightfall = 7;
+    public const int NightfallDelayMs = 180_000; // 3 minutes
 
     // Tick / timing
     public const int TickMs = 2200;

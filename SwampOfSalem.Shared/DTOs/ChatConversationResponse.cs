@@ -1,18 +1,30 @@
 ﻿namespace SwampOfSalem.Shared.DTOs;
 
 /// <summary>
-/// A single turn in a full gator conversation.
+/// A single message in a full gator conversation.
 /// </summary>
-public class ConversationTurn
+public class ConversationMessage
 {
-    /// <summary>ID of the alligator speaking this turn.</summary>
-    public int SpeakerId { get; set; }
+    /// <summary>Conversation number (always 1 for now).</summary>
+    public int Conversation { get; set; } = 1;
 
-    /// <summary>What the alligator says out loud.</summary>
-    public string Spoken { get; set; } = string.Empty;
+    /// <summary>Sequential message ID within the conversation.</summary>
+    public int MessageId { get; set; }
+
+    /// <summary>Display order (same as MessageId).</summary>
+    public int Order { get; set; }
+
+    /// <summary>ID of the alligator speaking this message.</summary>
+    public int SpeakerGatorId { get; set; }
+
+    /// <summary>ID of the alligator being spoken to.</summary>
+    public int SpeakingToGatorId { get; set; }
 
     /// <summary>The alligator's private inner thought (may be null).</summary>
     public string? Thought { get; set; }
+
+    /// <summary>What the alligator says out loud.</summary>
+    public string Speech { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -22,5 +34,5 @@ public class ChatConversationResponse
 {
     public int InitiatorId { get; set; }
     public int ResponderId { get; set; }
-    public List<ConversationTurn> Turns { get; set; } = [];
+    public List<ConversationMessage> Messages { get; set; } = [];
 }

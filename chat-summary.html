@@ -1244,5 +1244,107 @@ content: '\2600\FE0F'; /* â˜€ï¸ U+2600 + variation selector */</pre>
         </div>
       </div>
 
+      <!-- ═══════════════════════════════════════════════ SESSION 2 ═══ -->
+      <h2>Session 2 — Gameplay Timing, AI UX, Privacy, Topics, Memory Batching &amp; Conversation Lock</h2>
+
+      <div class="turn">
+        <div class="turn-user">
+          <div class="role role-user">User</div>
+          <p>Increase number of alligators to 5. Once 5 conversations have completed, a timer is set for 1 minute. After that time, any conversations in progress finish but no new conversations can start. Then the night phase starts.</p>
+        </div>
+        <div class="turn-assistant">
+          <div class="role role-copilot">GitHub Copilot</div>
+          <p>Changed <code>GameConstants.GatorCount</code> to 5, added <code>ConvLimitForNightfall = 5</code> and <code>NightfallDelayMs = 60_000</code>. Updated <code>simulation.js</code> <code>_onConversationCompleted</code> to start a countdown after 5 completions, set <code>state.noNewConversations</code> when the timer expires, and begin the night phase transition. Build successful.</p>
+        </div>
+      </div>
+
+      <div class="turn">
+        <div class="turn-user">
+          <div class="role role-user">User</div>
+          <p>Add the ability to ignore AI response messages after the first one.</p>
+        </div>
+        <div class="turn-assistant">
+          <div class="role role-copilot">GitHub Copilot</div>
+          <p>Added <code>state.ignoreSubsequentAiTurns</code> flag. When <code>true</code>, <code>_drainNextConvTurn</code> skips all AI turns past the first, keeping only the opening human line. A skip-AI-turns toggle button was added to <code>index.html</code>. Build successful.</p>
+        </div>
+      </div>
+
+      <div class="turn">
+        <div class="turn-user">
+          <div class="role role-user">User</div>
+          <p>Get rid of the generating AI popups, just display thinking bubbles.</p>
+        </div>
+        <div class="turn-assistant">
+          <div class="role role-copilot">GitHub Copilot</div>
+          <p>Removed the AI modal from <code>index.html</code>. Refactored <code>requestFullConversation</code> in <code>agentQueue.js</code> to no longer pause the sim or show a popup — it sets <code>isWaiting</code> on both gators (showing animated thinking dots) and auto-plays turns without blocking. Build successful.</p>
+        </div>
+      </div>
+
+      <div class="turn">
+        <div class="turn-user">
+          <div class="role role-user">User</div>
+          <p>Conversations that happen while hosting are private between the two talking — others cannot hear. But the text still needs to be displayed. Log all AI output in console.log.</p>
+        </div>
+        <div class="turn-assistant">
+          <div class="role role-copilot">GitHub Copilot</div>
+          <p>Updated <code>logChat</code> in <code>simulation.js</code> to accept an <code>isPrivate</code> flag that suppresses overhearing. Hosting calls pass <code>isPrivate = true</code>. <code>agentBridge.js</code> now logs every AI send/receive payload to <code>console.log</code>. Chat rendering in <code>rendering.js</code> shows a private badge on private entries. Build successful.</p>
+        </div>
+      </div>
+
+      <div class="turn">
+        <div class="turn-user">
+          <div class="role role-user">User</div>
+          <p>Set the limit to start nighttime as an hour. Conversations are not 'complete' until the characters on the screen have finished trading delayed messages. They will not separate until 3 seconds after the last message has been displayed.</p>
+        </div>
+        <div class="turn-assistant">
+          <div class="role role-copilot">GitHub Copilot</div>
+          <p>Changed <code>GameConstants.NightfallDelayMs</code> to <code>3_600_000</code> (1 hour). Updated <code>agentQueue.js</code> to add an <code>onComplete</code> callback to <code>requestFullConversation</code> and wait 3 seconds after the final turn before calling it and releasing gators. Conversation completion counting in <code>simulation.js</code> now happens inside the callback rather than at initiation. Build successful.</p>
+        </div>
+      </div>
+
+      <div class="turn">
+        <div class="turn-user">
+          <div class="role role-user">User</div>
+          <p>While hosting, gators discuss their opinions on topics: best local sports team (Rockets vs Jets, Chowda out-of-towners), local gossip, swamp leadership, favorite swamp activity. Attitudes change based on shared or differing opinions.</p>
+        </div>
+        <div class="turn-assistant">
+          <div class="role role-copilot">GitHub Copilot</div>
+          <p>Rewrote topic system in <code>helpers.js</code>: replaced generic topics with <code>sports_team</code>, <code>local_gossip</code>, <code>swamp_leadership</code>, <code>favorite_swamp_activity</code>. Added <code>TOPIC_LABELS</code>, <code>SPORTS_TEAMS</code>, updated <code>generateTopicOpinions</code>, <code>topicCompatibility</code> (handles string sports-team comparison), and added <code>applyTopicRelationDelta</code>. Hosting in <code>simulation.js</code> feeds a topic-discussion context to the AI and applies relation deltas on completion. Build successful.</p>
+        </div>
+      </div>
+
+      <div class="turn">
+        <div class="turn-user">
+          <div class="role role-user">User</div>
+          <p><em>(Runtime error)</em> POST /api/agent/initialize 400 Bad Request — caused by sports_team string inside numeric TopicOpinions dictionary.</p>
+        </div>
+        <div class="turn-assistant">
+          <div class="role role-copilot">GitHub Copilot</div>
+          <p>Added <code>SportsTeam</code> string property to <code>AlligatorSpawnData.cs</code>. Updated <code>simulation.js</code> initialization payload to strip <code>sports_team</code> out of the numeric opinions dictionary and send it as a separate <code>sportsTeam</code> field. Build successful.</p>
+        </div>
+      </div>
+
+      <div class="turn">
+        <div class="turn-user">
+          <div class="role role-user">User</div>
+          <p>Store memories locally in the browser, do not send them until starting a conversation to cut down on the huge number of requests to the LLM.</p>
+        </div>
+        <div class="turn-assistant">
+          <div class="role role-copilot">GitHub Copilot</div>
+          <p>Added <code>/api/agent/memory/batch</code> endpoint in <code>Program.cs</code>. Made <code>addAgentMemory</code> a no-op in <code>agentBridge.js</code> and added <code>flushMemories(alligatorId, entries)</code>. In <code>agentQueue.js</code>: added <code>_memoryBuffer</code> Map, made <code>recordMemory</code> local-only, flush both participants before <code>requestFullConversation</code>, and flush all living gators before <code>requestNightReport</code>. Build successful.</p>
+        </div>
+      </div>
+
+      <div class="turn">
+        <div class="turn-user">
+          <div class="role role-user">User</div>
+          <p>Only 1 conversation can occur or be occurring at a time.</p>
+        </div>
+        <div class="turn-assistant">
+          <div class="role role-copilot">GitHub Copilot</div>
+          <p>Added <code>activeConversation: false</code> to <code>state.js</code> (and reset in <code>resetGameState</code>). Both the <code>talking</code> and <code>hosting</code> start branches in <code>simulation.js</code> now check <code>!state.activeConversation</code> before initiating. The flag is set to <code>true</code> when a conversation starts and cleared back to <code>false</code> inside <code>_onConversationCompleted</code> (called after full playback + 3-second hold). Build successful.</p>
+        </div>
+      </div>
+
       </body>
       </html>
