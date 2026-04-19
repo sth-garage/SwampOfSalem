@@ -15,6 +15,18 @@ export const state = {
     privateChatBubbles: new Map(),   // homeIndex → enclosure DOM element
 
 
+    // Day conversation limit / nightfall countdown
+    completedConvCount:   0,
+    dayEndTimerActive:    false,
+    dayEndTimerExpiresAt: 0,
+    noNewConversations:   false,
+
+    // AI turn filtering
+    ignoreSubsequentAiTurns: false,
+
+    // Global conversation lock — only one conversation at a time
+    activeConversation: false,
+
     // Day/night
     isNight:      false,
     cycleTimer:   0,
@@ -41,6 +53,11 @@ export const state = {
 
 // ── Reset helper — called on respawn ──────────────────────────
 export function resetGameState() {
+    state.completedConvCount   = 0;
+    state.dayEndTimerActive    = false;
+    state.dayEndTimerExpiresAt = 0;
+    state.noNewConversations   = false;
+    state.activeConversation   = false;
     state.isNight       = false;
     state.gamePhase     = PHASE.DAY;
     state.cycleTimer    = DAY_TICKS;

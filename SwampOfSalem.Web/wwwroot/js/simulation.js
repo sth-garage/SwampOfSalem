@@ -3,12 +3,14 @@
     HOME_WARN_TICKS,
     VOTE_DISPLAY_TICKS,
     CONVICTION_THRESHOLD, GATOR_COUNT,
-    PERSONALITY_EMOJI, MAX_DEBATE_SPEAKERS, DEBATE_SPEAK_COOLDOWN
+    PERSONALITY_EMOJI, MAX_DEBATE_SPEAKERS, DEBATE_SPEAK_COOLDOWN,
+    CONV_LIMIT_FOR_NIGHTFALL, NIGHTFALL_DELAY_MS
 } from './gameConfig.js';
 import {
     rnd, rndF, rndTicks, stageBounds, dist, weightedPick,
     buildFigureSVG, culdesacLayout, buildCuldesacSVG,
-    speakDelayMs, topicCompatibility
+    speakDelayMs, topicCompatibility, applyTopicRelationDelta,
+    TOPICS, TOPIC_LABELS
 } from './helpers.js';
 import {
     createGator, initRelations, driftRelations, socialWeights, living
@@ -27,11 +29,58 @@ import {
 } from './rendering.js';
 import { requestDialog, requestFullConversation, requestVote, recordMemory, drainNextConvTurn } from './agentQueue.js';
 
+// ── Test Conversation ─────────────────────────────────────────
+export function testConversation() {
+    const alive = living();
+    if (alive.length < 2) { console.warn('Need at least 2 gators'); return; }
+
+    // Pick two random gators
+    const shuffled = alive.sort(() => Math.random() - 0.5);
+    const a = shuffled[0];
+    const b = shuffled[1];
+
+    // Pick a random topic
+    const topic = TOPICS[rnd(TOPICS.length)];
+    const topicLabel = TOPIC_LABELS[topic] ?? topic;
+
+    // Build context from their personalities and topic opinions
+    const aOpinion = a.topicOpinions?.[topic] ?? 'unknown';
+    const bOpinion = b.topicOpinions?.[topic] ?? 'unknown';
+    const context = `Test conversation about ${topicLabel}. ` +
+        `${a.name} (${a.personality}) feels ${aOpinion} about ${topic}. ` +
+        `${b.name} (${b.personality}) feels ${bOpinion} about ${topic}.`;
+
+    // Random turn count 5–8
+    const maxTurns = 5 + rnd(4);
+    const openingLine = `Hey ${b.name}, what do you think about ${topicLabel}?`;
+
+    // Position them near each other
+    const { W, H } = stageBounds();
+    const cx = W / 2, cy = H / 2;
+    a.x = cx - 40; a.y = cy; a.targetX = cx - 40; a.targetY = cy;
+    b.x = cx + 40; b.y = cy; b.targetX = cx + 40; b.targetY = cy;
+
+    // Set them to talking state
+    a.activity = 'talking'; a.talkingTo = b.id; a.ticksLeft = 9999;
+    b.activity = 'talking'; b.talkingTo = a.id; b.ticksLeft = 9999;
+    a.message = openingLine;
+    state.activeConversation = true;
+
+    console.log(`🧪 Test Conversation: ${a.name} & ${b.name} about ${topicLabel} (${maxTurns} turns)`);
+
+    requestFullConversation(a, b, openingLine, maxTurns, context, false, () => {
+        _onConversationCompleted();
+        a.activity = 'moving'; a.talkingTo = null; a.ticksLeft = rndTicks('moving');
+        b.activity = 'moving'; b.talkingTo = null; b.ticksLeft = rndTicks('moving');
+    });
+}
+
 // ── Chat logging & overhearing ────────────────────────────────
-function logChat(speaker, targetId, message, thought) {
+export function logChat(speaker, targetId, message, thought, isPrivate = false) {
     if (!message) return; // nothing meaningful to log
     const now = Date.now();
-    const entry = { day: state.dayNumber, from: speaker.id, to: targetId, message, thought: null, ts: now, type: 'said' };
+    const type = isPrivate ? 'private' : 'said';
+    const entry = { day: state.dayNumber, from: speaker.id, to: targetId, message, thought: null, ts: now, type };
     const thoughtEntry = thought ? { day: state.dayNumber, from: speaker.id, to: null, message: null, thought, ts: now, type: 'thought' } : null;
 
     // Log to speaker
@@ -47,13 +96,27 @@ function logChat(speaker, targetId, message, thought) {
         }
     }
 
-    // Nearby alligators overhear
-    for (const obs of living()) {
-        if (obs.id === speaker.id || obs.id === targetId) continue;
-        if (dist(obs, speaker) <= TALK_DIST) {
-            obs.chatLog.push({ day: state.dayNumber, from: speaker.id, to: targetId, message, thought: null, ts: now, type: 'overheard' });
-            recordMemory(obs.id, state.dayNumber, 'overheard', `Overheard ${speaker.name} say: "${message}"`, speaker.id);
+    // Private conversations cannot be overheard
+    if (!isPrivate) {
+        for (const obs of living()) {
+            if (obs.id === speaker.id || obs.id === targetId) continue;
+            if (dist(obs, speaker) <= TALK_DIST) {
+                obs.chatLog.push({ day: state.dayNumber, from: speaker.id, to: targetId, message, thought: null, ts: now, type: 'overheard' });
+                recordMemory(obs.id, state.dayNumber, 'overheard', `Overheard ${speaker.name} say: "${message}"`, speaker.id);
+            }
         }
+    }
+}
+
+// ── Conversation completion counter ───────────────────────────
+function _onConversationCompleted() {
+    state.activeConversation = false;
+    state.completedConvCount++;
+    console.log(`[Day] Conversation #${state.completedConvCount} completed.`);
+    if (!state.dayEndTimerActive && state.completedConvCount >= CONV_LIMIT_FOR_NIGHTFALL) {
+        state.dayEndTimerActive    = true;
+        state.dayEndTimerExpiresAt = Date.now() + NIGHTFALL_DELAY_MS;
+        console.log(`[Day] ${CONV_LIMIT_FOR_NIGHTFALL} conversations done — nightfall in ${NIGHTFALL_DELAY_MS / 1000}s`);
     }
 }
 
@@ -148,6 +211,21 @@ function tick() {
         else if (state.gamePhase === PHASE.DAWN)   { triggerDebate();    return; }
         else if (state.gamePhase === PHASE.DEBATE) { triggerVote();      return; }
         else if (state.gamePhase === PHASE.VOTE)   { triggerExecute();   return; }
+    }
+
+    // Conversation-limit nightfall: once the 1-min timer expires, lock new convs and watch for all to finish
+    if (state.gamePhase === PHASE.DAY && state.dayEndTimerActive) {
+        const now = Date.now();
+        if (!state.noNewConversations && now >= state.dayEndTimerExpiresAt) {
+            state.noNewConversations = true;
+        }
+        if (state.noNewConversations) {
+            const anyTalking = living().some(p => p.talkingTo !== null || p.activity === 'hosting' || p.activity === 'visiting');
+            if (!anyTalking) {
+                triggerNightfall();
+                return;
+            }
+        }
     }
 
     // At HOME_WARN_TICKS left in the day, end all conversations and walk everyone home
@@ -283,39 +361,51 @@ function tick() {
         if (gator.talkingTo !== null) {
             const partner = state.gators.find(p => p.id === gator.talkingTo);
             if (partner && partner.talkingTo === gator.id) {
+                // Hold gators in place while AI call is in-flight OR turns are still playing back
+                const aiPending = gator.isWaiting || partner.isWaiting;
+                const drainActive = (gator._convTurns && gator._convTurns.length > 0) ||
+                                    (partner._convTurns && partner._convTurns.length > 0);
+                if (aiPending || drainActive) {
+                    gator.ticksLeft = 1; // keep ticking until AI + playback finishes
+                    continue;
+                }
                 driftRelations(gator, partner);
                 recordMemory(gator.id, state.dayNumber, 'conversation_end', `Finished talking with ${partner.name}`, partner.id);
                 recordMemory(partner.id, state.dayNumber, 'conversation_end', `Finished talking with ${gator.name}`, gator.id);
-                // Record conversation in history
                 const pFeels = gator.relations[partner.id] ?? 0;
                 const qFeels = partner.relations[gator.id] ?? 0;
                 const pSentiment = pFeels > 20 ? 'positive' : pFeels < -20 ? 'negative' : 'neutral';
                 const qSentiment = qFeels > 20 ? 'positive' : qFeels < -20 ? 'negative' : 'neutral';
                 gator.history.push({ day: state.dayNumber, type: 'talked', with: partner.id, sentiment: pSentiment, detail: `Talked with ${partner.name} (felt ${pSentiment})` });
                 partner.history.push({ day: state.dayNumber, type: 'talked', with: gator.id, sentiment: qSentiment, detail: `Talked with ${gator.name} (felt ${qSentiment})` });
-                // 60-second cooldown before this pair can talk again
                 const now = Date.now();
                 (gator.recentTalkWith   ??= {})[partner.id] = now;
                 (partner.recentTalkWith ??= {})[gator.id]   = now;
                 partner.talkingTo = null;
                 partner.ticksLeft = 0;
                 free.add(partner.id);
-                // Opinion sharing: one gator mentions a third during conversation
                 _maybeShareOpinion(gator, partner);
+
+                // Conversation completion is now tracked via the onComplete callback from agentQueue
+                _onConversationCompleted();
             }
             gator.talkingTo = null;
             gator.message   = null;
             free.add(gator.id);
         }
 
-        // End hosting — guests leave
+        // End hosting — guests leave (but only once AI drain + 3s hold is done)
         if (gator.activity === 'hosting') {
+            // Hold in place while AI call is in-flight or drain is still active
+            const aiPending = gator.isWaiting || state.gators.some(g => g.guestOfIndex === gator.homeIndex && g.isWaiting);
+            const drainActive = (gator._convTurns && gator._convTurns.length > 0);
+            if (aiPending || drainActive) {
+                gator.ticksLeft = 1;
+                continue;
+            }
             for (const guest of state.gators) {
                 if (guest.guestOfIndex === gator.homeIndex) {
                     driftRelations(gator, guest);
-                    gator.history.push({ day: state.dayNumber, type: 'hosted', with: guest.id, detail: `Hosted ${guest.name} at home` });
-                    guest.history.push({ day: state.dayNumber, type: 'visited', with: gator.id, detail: `Visited ${gator.name} at home` });
-                    // 60-second cooldown
                     const now = Date.now();
                     (gator.recentTalkWith  ??= {})[guest.id]  = now;
                     (guest.recentTalkWith  ??= {})[gator.id]  = now;
@@ -366,6 +456,8 @@ function tick() {
         if (next === 'talking') {
             const TALK_COOLDOWN_MS = 60_000;
             const now = Date.now();
+            // Don't start new conversations if the nightfall lock or global conv lock is active
+            if (!state.noNewConversations && !state.activeConversation) {
             const nearby = [...free]
                 .filter(id => id !== gator.id)
                 .map(id => state.gators.find(p => p.id === id))
@@ -383,6 +475,7 @@ function tick() {
                 gator.activity  = 'talking'; gator.talkingTo = partner.id; gator.ticksLeft = dur;
                 partner.activity = 'talking'; partner.talkingTo = gator.id; partner.ticksLeft = dur;
 
+                state.activeConversation = true;
                 const firstMeeting = !(gator.met ??= new Set()).has(partner.id);
                 if (firstMeeting) {
                     // Mark both as met
@@ -400,7 +493,7 @@ function tick() {
                     const introCtx = `First meeting. ${gator.name} has opinions: ${Object.entries(gator.topicOpinions ?? {}).map(([t,v])=>`${t}:${v>0?'+':''}${v}`).join(', ')}.`;
                     const openingLine = `Hi, I'm ${gator.name}!`;
                     gator.message = openingLine;
-                    requestFullConversation(gator, partner, openingLine, 6, introCtx);
+                    requestFullConversation(gator, partner, openingLine, 6, introCtx, false, _onConversationCompleted);
 
                     gator.history.push({ day: state.dayNumber, type: 'first_meeting', with: partner.id, detail: `Met ${partner.name} for the first time (compat: ${compat})` });
                     partner.history.push({ day: state.dayNumber, type: 'first_meeting', with: gator.id, detail: `Met ${gator.name} for the first time (compat: ${compat})` });
@@ -409,7 +502,7 @@ function tick() {
                 } else {
                     const openingLine = `Hey ${partner.name}!`;
                     gator.message = openingLine;
-                    requestFullConversation(gator, partner, openingLine, 6, null);
+                    requestFullConversation(gator, partner, openingLine, 6, null, false, _onConversationCompleted);
                     recordMemory(gator.id, state.dayNumber, 'conversation_start', `Started talking with ${partner.name}`, partner.id);
                     recordMemory(partner.id, state.dayNumber, 'conversation_start', `${gator.name} started talking to me`, gator.id);
                 }
@@ -417,6 +510,7 @@ function tick() {
                 free.delete(partner.id);
                 continue;
             }
+            } // end if (!state.noNewConversations)
             const anyFree = [...free].filter(id => id !== gator.id).map(id => state.gators.find(p => p.id === id)).filter(Boolean);
             if (anyFree.length > 0) {
                 const target = anyFree
@@ -431,7 +525,7 @@ function tick() {
             next = 'moving';
         }
 
-        if (next === 'hosting') {
+        if (next === 'hosting' && !state.noNewConversations && !state.activeConversation) {
         const TALK_COOLDOWN_MS = 60_000;
         const now = Date.now();
         const guest = [...free]
@@ -459,10 +553,38 @@ function tick() {
             free.delete(gator.id);
             free.delete(guest.id);
 
+            // Build topic-discussion context for the AI
+            const hostOpinions  = gator.topicOpinions ?? {};
+            const guestOpinions = guest.topicOpinions ?? {};
+            const topicCtx = [
+                `Private visit at ${gator.name}'s home.`,
+                `Topics to discuss (weave naturally into conversation):`,
+                `- Sports: ${gator.name} supports ${hostOpinions.sports_team ?? '?'}, ${guest.name} supports ${guestOpinions.sports_team ?? '?'}.`,
+                `  Rockets and Jets are the local teams; Chowda fans are out-of-towners looked down on by locals.`,
+                `- Local gossip: share opinions/rumours about neighbours.`,
+                `- Swamp leadership: ${gator.name} ${(hostOpinions.swamp_leadership ?? 0) >= 0 ? 'approves' : 'disapproves'} of leadership; ${guest.name} ${(guestOpinions.swamp_leadership ?? 0) >= 0 ? 'approves' : 'disapproves'}.`,
+                `- Favorite swamp activities: discuss what each loves to do.`,
+                `Keep it casual and in-character.`,
+            ].join(' ');
+
+            // On completion: apply topic-based relation delta, then release gators
+            const _host = gator;
+            const _guest = guest;
+            const onHostingComplete = () => {
+                const { delta, reasons } = applyTopicRelationDelta(_host, _guest);
+                console.log(`[Hosting] ${_host.name} & ${_guest.name} topic delta: ${delta > 0 ? '+' : ''}${delta}`, reasons);
+                _host.history.push({ day: state.dayNumber, type: 'hosted', with: _guest.id, detail: `Hosted ${_guest.name}; topic bond: ${delta > 0 ? '+' : ''}${delta}` });
+                _guest.history.push({ day: state.dayNumber, type: 'visited', with: _host.id, detail: `Visited ${_host.name}; topic bond: ${delta > 0 ? '+' : ''}${delta}` });
+                recordMemory(_host.id, state.dayNumber, 'hosting_complete', `Finished hosting ${_guest.name}`, _guest.id);
+                recordMemory(_guest.id, state.dayNumber, 'visit_complete', `Finished visiting ${_host.name}`, _host.id);
+                _onConversationCompleted();
+            };
+
+            state.activeConversation = true;
             // Start a private conversation between host and guest
             const openingLine = `Come on in, ${guest.name}!`;
             gator.message = openingLine;
-            requestFullConversation(gator, guest, openingLine, 6, 'Private visit at home. Keep it casual and in-character.');
+            requestFullConversation(gator, guest, openingLine, 6, topicCtx, true, onHostingComplete);
             recordMemory(gator.id, state.dayNumber, 'hosting', `Hosted ${guest.name} at home`, guest.id);
             recordMemory(guest.id, state.dayNumber, 'visiting', `Visited ${gator.name} at home`, gator.id);
 
@@ -775,14 +897,18 @@ function spawnGators() {
     updatePhaseLabel();
 
     // Initialize SK agents on the server with the spawned alligator data
-    const alligatorData = state.gators.map(p => ({
-        id: p.id,
-        name: p.name,
-        personality: p.personality,
-        isMurderer: p.id === state.murdererId,
-        isLiar: p.liar,
-        topicOpinions: p.topicOpinions
-    }));
+    const alligatorData = state.gators.map(p => {
+        const { sports_team, ...numericOpinions } = p.topicOpinions ?? {};
+        return {
+            id: p.id,
+            name: p.name,
+            personality: p.personality,
+            isMurderer: p.id === state.murdererId,
+            isLiar: p.liar,
+            topicOpinions: numericOpinions,
+            sportsTeam: sports_team ?? ''
+        };
+    });
     fetch('/api/agent/initialize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -801,6 +927,15 @@ export function initSimulation(agentInterop) {
     document.getElementById('respawnBtn').addEventListener('click', spawnGators);
     document.getElementById('goRestartBtn').addEventListener('click', spawnGators);
 
+    const skipAiBtn = document.getElementById('skipAiTurnsBtn');
+    if (skipAiBtn) {
+        skipAiBtn.addEventListener('click', () => {
+            state.ignoreSubsequentAiTurns = !state.ignoreSubsequentAiTurns;
+            skipAiBtn.textContent = `⏭ Skip AI turns: ${state.ignoreSubsequentAiTurns ? 'ON' : 'OFF'}`;
+            skipAiBtn.style.color = state.ignoreSubsequentAiTurns ? '#a8f090' : '';
+        });
+    }
+
     document.getElementById('pauseBtn').addEventListener('click', () => {
         if (state.paused) {
             state.paused = false;
@@ -812,6 +947,8 @@ export function initSimulation(agentInterop) {
             if (state.tickInterval) { clearInterval(state.tickInterval); state.tickInterval = null; }
         }
     });
+
+    document.getElementById('testConvBtn').addEventListener('click', testConversation);
 
     window.addEventListener('resize', () => {
         const existing = document.getElementById('culdesac');
