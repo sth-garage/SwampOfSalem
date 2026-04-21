@@ -7,12 +7,20 @@ import { isAgentAvailable, getFullConversation, addAgentMemory, getNightReport, 
 import { state } from './state.js';
 import { living } from './gator.js';
 import { logChat } from './simulation.js';
+import { TICK_MS } from './gameConfig.js';
 
 // Track in-flight requests to avoid duplicate calls for the same pair
 const _pending = new Map();
 
 // Global lock — only one conversation at a time across all gators
 let _conversationInProgress = false;
+
+// Store reference to tick function to avoid circular import issues
+let _tickFunction = null;
+
+export function setTickFunction(tickFn) {
+    _tickFunction = tickFn;
+}
 
 // ── Local memory buffer ───────────────────────────────────────
 // Memories are stored here and only flushed to the server when a conversation starts.
@@ -62,6 +70,40 @@ export async function requestFullConversation(initiator, responder, openingLine,
 
     _conversationInProgress = true;
 
+    // Position gators facing each other horizontally for conversation
+    // Calculate midpoint between them
+    const midX = (initiator.x + responder.x) / 2;
+    const midY = (initiator.y + responder.y) / 2;
+    const spacing = 100; // pixels apart horizontally
+
+    // Determine who goes left and who goes right (left-most stays left)
+    const leftGator = initiator.x < responder.x ? initiator : responder;
+    const rightGator = initiator.x < responder.x ? responder : initiator;
+
+    // Position them facing each other
+    leftGator.x = midX - spacing;
+    leftGator.y = midY;
+    leftGator.targetX = leftGator.x;
+    leftGator.targetY = leftGator.y;
+    leftGator._conversationFrozen = true;
+
+    rightGator.x = midX + spacing;
+    rightGator.y = midY;
+    rightGator.targetX = rightGator.x;
+    rightGator.targetY = rightGator.y;
+    rightGator._conversationFrozen = true;
+
+    // Pause the game while waiting for AI response
+    if (!state.paused) {
+        state.paused = true;
+        const pauseBtn = document.getElementById('pauseBtn');
+        if (pauseBtn) pauseBtn.textContent = '⏸ Paused (AI thinking...)';
+        if (state.tickInterval) {
+            clearInterval(state.tickInterval);
+            state.tickInterval = null;
+        }
+    }
+
     // Show thinking bubbles on both gators while waiting
     initiator.isWaiting = true;
     responder.isWaiting = true;
@@ -73,17 +115,33 @@ export async function requestFullConversation(initiator, responder, openingLine,
     ]);
 
     const promise = getFullConversation(initiator.id, responder.id, openingLine, maxTurns, context)
-        .then(turns => {
+        .then(async turns => {
             initiator.isWaiting = false;
             responder.isWaiting = false;
 
+            console.log(`[Conversation] Received ${turns?.length ?? 0} turns from AI`);
+
             if (!turns || turns.length <= 1) {
                 // A single message (greeting) is not a conversation — ignore it
-                console.log(`⏭ Ignoring result with ${turns?.length ?? 0} message(s) — not a real conversation`);
+                console.warn(`⏭ Rejecting conversation with ${turns?.length ?? 0} message(s) — need at least 2 messages`);
+                console.warn(`   This likely means the AI returned malformed data or the server had an error.`);
+                console.warn(`   Check the server logs for "[ParseConversation]" messages to diagnose.`);
                 _conversationInProgress = false;
                 state.activeConversation = false;
                 initiator.activity = 'moving'; initiator.talkingTo = null; initiator.message = null;
                 responder.activity = 'moving'; responder.talkingTo = null; responder.message = null;
+                initiator._conversationFrozen = false;
+                responder._conversationFrozen = false;
+
+                // Resume the game
+                if (state.paused) {
+                    state.paused = false;
+                    const pauseBtn = document.getElementById('pauseBtn');
+                    if (pauseBtn) pauseBtn.textContent = '⏸ Pause';
+                    if (!state.tickInterval && _tickFunction) {
+                        state.tickInterval = setInterval(_tickFunction, TICK_MS);
+                    }
+                }
                 return;
             }
 
@@ -95,6 +153,16 @@ export async function requestFullConversation(initiator, responder, openingLine,
                 console.log(`  [${i + 1}] ${speaker.name}: ${t.speech ?? ''}${t.thought ? ` (💭 ${t.thought})` : ''}`);
             });
 
+            // Resume the game now that AI response arrived
+            if (state.paused) {
+                state.paused = false;
+                const pauseBtn = document.getElementById('pauseBtn');
+                if (pauseBtn) pauseBtn.textContent = '⏸ Pause';
+                if (!state.tickInterval && _tickFunction) {
+                    state.tickInterval = setInterval(_tickFunction, TICK_MS);
+                }
+            }
+
             // Start playing back turns immediately
             initiator._convTurns      = turns;
             initiator._convPartner    = responder;
@@ -103,7 +171,7 @@ export async function requestFullConversation(initiator, responder, openingLine,
             initiator._convOnComplete = onComplete;
             _drainNextConvTurn(initiator, responder);
         })
-        .catch(err => {
+        .catch(async err => {
             console.error('requestFullConversation failed:', err);
             initiator.isWaiting = false;
             responder.isWaiting = false;
@@ -111,6 +179,18 @@ export async function requestFullConversation(initiator, responder, openingLine,
             state.activeConversation = false;
             initiator.activity = 'moving'; initiator.talkingTo = null; initiator.message = null;
             responder.activity = 'moving'; responder.talkingTo = null; responder.message = null;
+            initiator._conversationFrozen = false;
+            responder._conversationFrozen = false;
+
+            // Resume the game
+            if (state.paused) {
+                state.paused = false;
+                const pauseBtn = document.getElementById('pauseBtn');
+                if (pauseBtn) pauseBtn.textContent = '⏸ Pause';
+                if (!state.tickInterval && _tickFunction) {
+                    state.tickInterval = setInterval(_tickFunction, TICK_MS);
+                }
+            }
         });
 
     _pending.set(key, promise);
@@ -133,20 +213,6 @@ function _drainNextConvTurn(initiator, responder) {
     const turn = turns[initiator._convTurnIndex++];
     const isPrivate = !!initiator._convIsPrivate;
 
-    // If ignoreSubsequentAiTurns is on, skip all AI-generated turns after the first response
-    // _convTurnIndex was just incremented, so index 0 = opening line, index 1 = first AI response
-    // We want to show the opening line (0) and the first AI response (1), then stop
-    if (state.ignoreSubsequentAiTurns && initiator._convTurnIndex > 2) {
-        const onComplete = initiator._convOnComplete ?? null;
-        initiator._convTurns      = null;
-        initiator._convPartner    = null;
-        initiator._convTurnIndex  = 0;
-        initiator._convIsPrivate  = false;
-        initiator._convOnComplete = null;
-        setTimeout(() => { if (onComplete) onComplete(); }, 3000);
-        return;
-    }
-
     const speaker = turn.speakerGatorId === initiator.id ? initiator : responder;
     const listener = turn.speakerGatorId === initiator.id ? responder : initiator;
     if (turn.speech && turn.speech.length > 0) {
@@ -165,12 +231,28 @@ function _drainNextConvTurn(initiator, responder) {
     } else {
         // All turns displayed — hold 3 s, then fire onComplete and clean up
         const onComplete = initiator._convOnComplete ?? null;
+        // Set flag to keep gators in place during final hold
+        initiator._convHolding = true;
+        responder._convHolding = true;
         setTimeout(() => {
+            // Update recentTalkWith timestamps to enforce cooldown between conversations
+            const now = Date.now();
+            if (!initiator.recentTalkWith) initiator.recentTalkWith = {};
+            if (!responder.recentTalkWith) responder.recentTalkWith = {};
+            initiator.recentTalkWith[responder.id] = now;
+            responder.recentTalkWith[initiator.id] = now;
+
+            // Unfreeze gators so they can move again
+            initiator._conversationFrozen = false;
+            responder._conversationFrozen = false;
+
             initiator._convTurns      = null;
             initiator._convPartner    = null;
             initiator._convTurnIndex  = 0;
             initiator._convIsPrivate  = false;
             initiator._convOnComplete = null;
+            initiator._convHolding    = false;
+            responder._convHolding    = false;
             _conversationInProgress = false;
             if (onComplete) onComplete();
         }, 3000);

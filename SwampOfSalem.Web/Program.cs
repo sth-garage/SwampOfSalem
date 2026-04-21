@@ -150,7 +150,7 @@ api.MapPost("/conversation", async (ChatConversationRequest request, GatorAgentS
         {
             InitiatorId = request.InitiatorId,
             ResponderId = request.ResponderId,
-            Messages = [new ConversationMessage { Conversation = 1, MessageId = 1, Order = 1, SpeakerGatorId = request.InitiatorId, SpeakingToGatorId = request.ResponderId, Speech = request.OpeningLine }]
+            Messages = new List<ConversationMessage>()
         });
     }
 });

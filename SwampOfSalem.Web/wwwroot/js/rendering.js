@@ -192,7 +192,32 @@ export function renderGator(p) {
             state.bubbles.set(p.id, bubble);
         }
 
-        // Offset bubbles vertically so conversing pairs don't overlap
+        // Determine left/right positioning for conversation bubbles
+        let bubbleOffsetX = 0; // horizontal offset from gator center
+        let bubbleClass = 'chat-bubble';
+        let alignSide = 'center'; // 'left', 'right', or 'center'
+
+        if (p.talkingTo != null) {
+            const partner = state.gators.find(q => q.id === p.talkingTo);
+            if (partner) {
+                // Determine if this gator is on the left or right
+                if (p.x < partner.x) {
+                    // This gator is on the left - bubble goes to the left
+                    bubbleOffsetX = -90;
+                    alignSide = 'left';
+                    bubbleClass = `chat-bubble bubble-left bubble-gator-${p.id % 8}`;
+                } else {
+                    // This gator is on the right - bubble goes to the right
+                    bubbleOffsetX = 90;
+                    alignSide = 'right';
+                    bubbleClass = `chat-bubble bubble-right bubble-gator-${p.id % 8}`;
+                }
+            }
+        }
+
+        bubble.className = bubbleClass;
+
+        // Position bubble - offset vertically to prevent overlap, horizontally for left/right
         let bubbleOffsetY = -38;
         if (p.talkingTo != null) {
             const partner = state.gators.find(q => q.id === p.talkingTo);
@@ -208,8 +233,18 @@ export function renderGator(p) {
             }
         }
 
-        bubble.style.left = `${p.x + GATOR_SIZE / 2 - 20}px`;
-        bubble.style.top  = `${p.y + bubbleOffsetY}px`;
+        if (alignSide === 'left') {
+            bubble.style.left = `${p.x + GATOR_SIZE / 2 + bubbleOffsetX}px`;
+            bubble.style.transform = 'translateX(0)';
+        } else if (alignSide === 'right') {
+            bubble.style.left = `${p.x + GATOR_SIZE / 2 + bubbleOffsetX}px`;
+            bubble.style.transform = 'translateX(-100%)';
+        } else {
+            bubble.style.left = `${p.x + GATOR_SIZE / 2 - 20}px`;
+            bubble.style.transform = 'translateX(-50%)';
+        }
+        bubble.style.top = `${p.y + bubbleOffsetY}px`;
+
         if (p.isWaiting && !p.message) {
             // Show animated dots while waiting for AI response
             if (!bubble.querySelector('.bubble-waiting')) {

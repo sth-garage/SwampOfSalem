@@ -21,9 +21,6 @@ export const state = {
     dayEndTimerExpiresAt: 0,
     noNewConversations:   false,
 
-    // AI turn filtering
-    ignoreSubsequentAiTurns: false,
-
     // Global conversation lock — only one conversation at a time
     activeConversation: false,
 

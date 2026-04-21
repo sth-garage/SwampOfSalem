@@ -40,6 +40,32 @@
             border: 1px solid rgba(60,140,60,.3); border-radius: 8px; cursor: pointer;
         }
         .splash-buttons .btn-secondary:hover { background: rgba(30,65,28,.85); }
+        /* Gator count input */
+        .gator-count-container { 
+            display: flex; 
+            align-items: center; 
+            gap: 0.5rem; 
+            margin-bottom: 1rem;
+            justify-content: center;
+        }
+        .gator-count-container label { 
+            color: #8ab880; 
+            font-size: 0.9rem; 
+        }
+        .gator-count-container input[type="number"] {
+            width: 60px;
+            padding: 0.4rem 0.6rem;
+            font-size: 1rem;
+            background: rgba(10,30,10,.8);
+            color: #b8d8a8;
+            border: 1px solid rgba(60,140,60,.3);
+            border-radius: 6px;
+            text-align: center;
+        }
+        .gator-count-container input[type="number"]:focus {
+            outline: none;
+            border-color: rgba(80,180,60,.5);
+        }
         /* Test panel */
         .ai-test-panel { text-align: left; }
         .ai-test-panel h2 { font-size: 1.2rem; color: #a8d890; margin-bottom: .5rem; }
@@ -88,6 +114,10 @@
                 <h1>🐊 Swamp of Salem</h1>
                 <div id="splash-main">
                     <p class="splash-subtitle">A murder-mystery simulation powered by AI agents</p>
+                    <div class="gator-count-container">
+                        <label for="gatorCountInput">Number of Gators:</label>
+                        <input type="number" id="gatorCountInput" min="2" max="9" value="7" />
+                    </div>
                     <div class="splash-buttons">
                         <button class="btn-primary" id="startGameBtn">▶ Start Game</button>
                         <button class="btn-secondary" id="testAiBtn">🔌 Test AI Connection</button>
@@ -132,7 +162,6 @@
                 <button id="respawnBtn">↺ Respawn</button>
                 <button id="pauseBtn" class="secondary">⏸ Pause</button>
                 <button id="dialogModeBtn" class="secondary" title="Toggle between AI Agent dialog and local JS dialog">🤖 AI</button>
-                <button id="skipAiTurnsBtn" class="secondary" title="After the first AI line, skip remaining AI turns in a conversation">⏭ Skip AI turns: OFF</button>
                 <button id="testConvBtn" class="secondary" title="Two random gators have a test conversation">🧪 Test Conversation</button>
             </div>
             <div id="stats"></div>
@@ -192,9 +221,21 @@
 
         // Start game button
         document.getElementById('startGameBtn').addEventListener('click', async () => {
+            // Get the user-selected gator count
+            const gatorCountInput = document.getElementById('gatorCountInput');
+            let gatorCount = parseInt(gatorCountInput.value, 10);
+
+            // Validate and clamp the value
+            if (isNaN(gatorCount) || gatorCount < 2) gatorCount = 2;
+            if (gatorCount > 9) gatorCount = 9;
+            gatorCountInput.value = gatorCount; // Update display to show clamped value
+
             // Load game config from server and set on window BEFORE importing any JS modules
             const cfgResp = await fetch('/api/game-config');
             window.GameConfig = await cfgResp.json();
+
+            // Override GATOR_COUNT with user selection
+            window.GameConfig.GATOR_COUNT = gatorCount;
 
             document.getElementById('splash').style.display = 'none';
             const dialogSource = configData?.dialogSource ?? 'AI';
@@ -220,8 +261,20 @@
 
         // Test Conversation button — starts game then triggers a test conversation
         document.getElementById('testConvSplashBtn').addEventListener('click', async () => {
+            // Get the user-selected gator count
+            const gatorCountInput = document.getElementById('gatorCountInput');
+            let gatorCount = parseInt(gatorCountInput.value, 10);
+
+            // Validate and clamp the value
+            if (isNaN(gatorCount) || gatorCount < 2) gatorCount = 2;
+            if (gatorCount > 9) gatorCount = 9;
+            gatorCountInput.value = gatorCount;
+
             const cfgResp = await fetch('/api/game-config');
             window.GameConfig = await cfgResp.json();
+
+            // Override GATOR_COUNT with user selection
+            window.GameConfig.GATOR_COUNT = gatorCount;
 
             document.getElementById('splash').style.display = 'none';
             const dialogSource = configData?.dialogSource ?? 'AI';

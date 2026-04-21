@@ -27,7 +27,7 @@ import {
     initTooltip, showTooltip, moveTooltip, hideTooltip,
     pinTooltip, refreshPinnedTooltip, cleanPrivateChatBubbles
 } from './rendering.js';
-import { requestDialog, requestFullConversation, requestVote, recordMemory, drainNextConvTurn } from './agentQueue.js';
+import { requestDialog, requestFullConversation, requestVote, recordMemory, drainNextConvTurn, setTickFunction } from './agentQueue.js';
 
 // ── Test Conversation ─────────────────────────────────────────
 export function testConversation() {
@@ -361,11 +361,12 @@ function tick() {
         if (gator.talkingTo !== null) {
             const partner = state.gators.find(p => p.id === gator.talkingTo);
             if (partner && partner.talkingTo === gator.id) {
-                // Hold gators in place while AI call is in-flight OR turns are still playing back
+                // Hold gators in place while AI call is in-flight OR turns are still playing back OR in final hold
                 const aiPending = gator.isWaiting || partner.isWaiting;
-                const drainActive = (gator._convTurns && gator._convTurns.length > 0) ||
-                                    (partner._convTurns && partner._convTurns.length > 0);
-                if (aiPending || drainActive) {
+                const gatorDraining = gator._convTurns && gator._convTurnIndex < gator._convTurns.length;
+                const partnerDraining = partner._convTurns && partner._convTurnIndex < partner._convTurns.length;
+                const finalHold = gator._convHolding || partner._convHolding;
+                if (aiPending || gatorDraining || partnerDraining || finalHold) {
                     gator.ticksLeft = 1; // keep ticking until AI + playback finishes
                     continue;
                 }
@@ -463,7 +464,8 @@ function tick() {
                 .map(id => state.gators.find(p => p.id === id))
                 .filter(p => p && dist(gator, p) <= TALK_DIST)
                 .filter(p => (gator.relations[p.id] ?? 0) > -60)
-                .filter(p => (now - ((gator.recentTalkWith ?? {})[p.id] ?? 0)) >= TALK_COOLDOWN_MS);
+                .filter(p => (now - ((gator.recentTalkWith ?? {})[p.id] ?? 0)) >= TALK_COOLDOWN_MS)
+                .filter(p => p.activity !== 'talking' && p.talkingTo == null); // Don't invite gators already committed to a conversation
 
             if (nearby.length > 0) {
                 const partner = nearby.reduce((best, cand) => {
@@ -532,6 +534,7 @@ function tick() {
             .filter(id => id !== gator.id)
             .filter(id => (now - ((gator.recentTalkWith ?? {})[id] ?? 0)) >= TALK_COOLDOWN_MS)
             .map(id => state.gators.find(p => p.id === id))
+            .filter(p => p && p.activity !== 'talking' && p.talkingTo == null) // Don't invite gators already committed
             .filter(Boolean)[0];
 
         if (guest) {
@@ -724,6 +727,12 @@ function gameLoop() {
                     p.y = Math.max(0, Math.min(H, p.y + (dy/d) * p.speed));
                 }
             } else if (p.activity === 'talking') {
+                // Freeze gators completely during conversation
+                if (p._conversationFrozen) {
+                    // Do not move at all - stay completely frozen
+                    continue;
+                }
+
                 const partner = state.gators.find(q => q.id === p.talkingTo);
                 if (partner) {
                     const dx = (partner.x+cx)-(p.x+cx), dy = (partner.y+cx)-(p.y+cx);
@@ -740,6 +749,7 @@ function gameLoop() {
                     p.targetY = p.y;
                 }
             } else {
+                // Default movement behavior
                 const dx = p.targetX - p.x, dy = p.targetY - p.y;
                 const d  = Math.sqrt(dx*dx+dy*dy);
                 if (d <= p.speed) {
@@ -924,17 +934,11 @@ function spawnGators() {
 export function initSimulation(agentInterop) {
     initTooltip();
 
+    // Provide tick function reference to agentQueue to avoid circular import
+    setTickFunction(tick);
+
     document.getElementById('respawnBtn').addEventListener('click', spawnGators);
     document.getElementById('goRestartBtn').addEventListener('click', spawnGators);
-
-    const skipAiBtn = document.getElementById('skipAiTurnsBtn');
-    if (skipAiBtn) {
-        skipAiBtn.addEventListener('click', () => {
-            state.ignoreSubsequentAiTurns = !state.ignoreSubsequentAiTurns;
-            skipAiBtn.textContent = `⏭ Skip AI turns: ${state.ignoreSubsequentAiTurns ? 'ON' : 'OFF'}`;
-            skipAiBtn.style.color = state.ignoreSubsequentAiTurns ? '#a8f090' : '';
-        });
-    }
 
     document.getElementById('pauseBtn').addEventListener('click', () => {
         if (state.paused) {

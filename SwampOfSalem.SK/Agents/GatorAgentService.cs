@@ -403,16 +403,12 @@ public class GatorAgentService
 
         if (initiator is null || responder is null)
         {
-            Console.Error.WriteLine($"[Conversation] Agent not found: initiator({request.InitiatorId})={initiator?.Name ?? "NULL"}, responder({request.ResponderId})={responder?.Name ?? "NULL"}. Returning fallback.");
+            Console.Error.WriteLine($"[Conversation] Agent not found: initiator({request.InitiatorId})={initiator?.Name ?? "NULL"}, responder({request.ResponderId})={responder?.Name ?? "NULL"}. Returning empty response.");
             return new ChatConversationResponse
             {
                 InitiatorId = request.InitiatorId,
                 ResponderId = request.ResponderId,
-                Messages =
-                [
-                    new ConversationMessage { Conversation = 1, MessageId = 1, Order = 1, SpeakerGatorId = request.InitiatorId, SpeakingToGatorId = request.ResponderId, Speech = request.OpeningLine, Thought = "Hope this goes well..." },
-                    new ConversationMessage { Conversation = 1, MessageId = 2, Order = 2, SpeakerGatorId = request.ResponderId, SpeakingToGatorId = request.InitiatorId, Speech = "Hey there!", Thought = "Seems friendly enough." },
-                ]
+                Messages = new List<ConversationMessage>()
             };
         }
 
@@ -441,21 +437,26 @@ public class GatorAgentService
 
             {{initiator.Name}} has already said: "{{request.OpeningLine}}"
 
-            Continue the conversation for up to {{maxTurns}} total turns (including the opening line already spoken).
-            The conversation MUST contain at least 5 messages total — do not end it early.
-            Alternate between {{responder.Name}} and {{initiator.Name}}, starting with {{responder.Name}}.
-            Keep each line SHORT (1-2 sentences), natural, and in-character.
+            Continue the conversation for {{maxTurns}} total turns (including the opening line already spoken).
+            The conversation MUST contain EXACTLY {{maxTurns}} messages total.
+            Alternate between speakers, starting with the opening line from {{initiator.Name}}.
+            Keep each line SHORT (1-2 sentences max), natural, and in-character.
 
-            Respond with a JSON array only — no markdown, no explanation. Format:
+            CRITICAL: Respond with ONLY a JSON array. NO markdown code blocks, NO explanations, NO extra text.
+            Format (exactly {{maxTurns}} items):
             [
-              {"speakerId": <id>, "spoken": "...", "thought": "..."},
-              ...
+              {"speakerId": {{initiator.Id}}, "spoken": "{{request.OpeningLine}}", "thought": "..."},
+              {"speakerId": {{responder.Id}}, "spoken": "...", "thought": "..."},
+              {"speakerId": {{initiator.Id}}, "spoken": "...", "thought": "..."},
+              ...continue until {{maxTurns}} total messages...
             ]
-            Include the opening line as the first element with speakerId {{initiator.Id}}.
+
+            Include the opening line "{{request.OpeningLine}}" as the first element with speakerId {{initiator.Id}}.
+            Every message MUST have a "thought" field (the character's private inner thoughts).
             """;
 
         var history = new ChatHistory(systemPrompt);
-        history.AddUserMessage("Generate the conversation now.");
+        history.AddUserMessage($"Generate exactly {maxTurns} conversation messages in JSON format. Start with the opening line from {initiator.Name} (ID {initiator.Id}), then alternate speakers. Output ONLY the JSON array, nothing else.");
 
         var result = await chatService.GetChatMessageContentAsync(history);
         var raw = result?.Content ?? "[]";
@@ -488,13 +489,10 @@ public class GatorAgentService
 
     private static List<ConversationMessage> ParseConversationMessages(string raw, int initiatorId, int responderId, string openingLine, int maxTurns)
     {
-        var fallback = new List<ConversationMessage>
-        {
-            new() { Conversation = 1, MessageId = 1, Order = 1, SpeakerGatorId = initiatorId, SpeakingToGatorId = responderId, Speech = openingLine }
-        };
-
         try
         {
+            Console.WriteLine($"[ParseConversation] Raw AI response ({raw.Length} chars): {raw}");
+
             var json = raw.Trim();
             if (json.StartsWith("```"))
             {
@@ -505,6 +503,8 @@ public class GatorAgentService
             var bracketEnd = json.LastIndexOf(']');
             if (bracketStart >= 0 && bracketEnd > bracketStart)
                 json = json[bracketStart..(bracketEnd + 1)];
+
+            Console.WriteLine($"[ParseConversation] Cleaned JSON: {json}");
 
             using var doc = System.Text.Json.JsonDocument.Parse(json);
             var messages = new List<ConversationMessage>();
@@ -531,11 +531,20 @@ public class GatorAgentService
                     });
                 }
             }
-            return messages.Count > 0 ? messages : fallback;
+
+            Console.WriteLine($"[ParseConversation] Parsed {messages.Count} messages");
+            if (messages.Count == 0)
+            {
+                Console.Error.WriteLine("[ParseConversation] WARNING: Parsed 0 messages from AI response - NO FALLBACK, returning empty list");
+            }
+
+            return messages;
         }
-        catch
+        catch (Exception ex)
         {
-            return fallback;
+            Console.Error.WriteLine($"[ParseConversation] ERROR parsing AI response: {ex.Message}");
+            Console.Error.WriteLine($"[ParseConversation] NO FALLBACK - returning empty list");
+            return new List<ConversationMessage>();
         }
     }
 

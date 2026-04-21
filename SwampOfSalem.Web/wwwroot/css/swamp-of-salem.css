@@ -616,6 +616,83 @@ button.secondary:hover { background: rgba(30, 65, 28, 0.85); }
     to   { transform: translateX(-50%) scale(1);   opacity: 1; }
 }
 
+/* Left/right bubble positioning for conversations */
+.bubble-left {
+    text-align: left;
+}
+.bubble-left::after {
+    left: 20px;
+}
+.bubble-left @keyframes bubblePop {
+    from { transform: translateX(0) scale(.72); opacity: 0; }
+    to   { transform: translateX(0) scale(1);   opacity: 1; }
+}
+
+.bubble-right {
+    text-align: right;
+}
+.bubble-right::after {
+    left: auto;
+    right: 20px;
+    transform: translateX(0);
+}
+
+/* Unique bubble colors for each gator (8 distinct color schemes) */
+.bubble-gator-0 {
+    background: rgba(28, 48, 28, 0.96);
+    border-color: rgba(80,180,80,.4);
+}
+.bubble-gator-0::after { border-top-color: rgba(80,180,80,.4); }
+
+.bubble-gator-1 {
+    background: rgba(18, 38, 48, 0.96);
+    border-color: rgba(60,160,200,.4);
+    color: #b0d8e8;
+}
+.bubble-gator-1::after { border-top-color: rgba(60,160,200,.4); }
+
+.bubble-gator-2 {
+    background: rgba(48, 28, 38, 0.96);
+    border-color: rgba(200,80,140,.4);
+    color: #e8c0d8;
+}
+.bubble-gator-2::after { border-top-color: rgba(200,80,140,.4); }
+
+.bubble-gator-3 {
+    background: rgba(38, 38, 18, 0.96);
+    border-color: rgba(180,180,60,.4);
+    color: #e8e8b0;
+}
+.bubble-gator-3::after { border-top-color: rgba(180,180,60,.4); }
+
+.bubble-gator-4 {
+    background: rgba(48, 38, 18, 0.96);
+    border-color: rgba(200,140,60,.4);
+    color: #e8d8b0;
+}
+.bubble-gator-4::after { border-top-color: rgba(200,140,60,.4); }
+
+.bubble-gator-5 {
+    background: rgba(28, 18, 48, 0.96);
+    border-color: rgba(120,80,200,.4);
+    color: #d0b0e8;
+}
+.bubble-gator-5::after { border-top-color: rgba(120,80,200,.4); }
+
+.bubble-gator-6 {
+    background: rgba(18, 48, 38, 0.96);
+    border-color: rgba(60,200,140,.4);
+    color: #b0e8d8;
+}
+.bubble-gator-6::after { border-top-color: rgba(60,200,140,.4); }
+
+.bubble-gator-7 {
+    background: rgba(48, 18, 28, 0.96);
+    border-color: rgba(200,60,100,.4);
+    color: #e8b0c8;
+}
+.bubble-gator-7::after { border-top-color: rgba(200,60,100,.4); }
+
 /* â”€â”€ Thought bubbles â”€â”€ */
 .thought-bubble {
     position: absolute;
