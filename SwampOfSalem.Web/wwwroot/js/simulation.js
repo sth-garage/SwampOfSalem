@@ -45,7 +45,7 @@ import {
     VOTE_DISPLAY_TICKS,
     CONVICTION_THRESHOLD, GATOR_COUNT,
     PERSONALITY_EMOJI, MAX_DEBATE_SPEAKERS, DEBATE_SPEAK_COOLDOWN,
-    CONV_LIMIT_FOR_NIGHTFALL, NIGHTFALL_DELAY_MS
+    CONV_LIMIT_FOR_NIGHTFALL
 } from './gameConfig.js';
 import {
     rnd, rndF, rndTicks, stageBounds, dist, weightedPick,
@@ -213,9 +213,8 @@ function _onConversationCompleted() {
     state.completedConvCount++;
     console.log(`[Day] Conversation #${state.completedConvCount} completed.`);
     if (!state.dayEndTimerActive && state.completedConvCount >= CONV_LIMIT_FOR_NIGHTFALL) {
-        state.dayEndTimerActive    = true;
-        state.dayEndTimerExpiresAt = Date.now() + NIGHTFALL_DELAY_MS;
-        console.log(`[Day] ${CONV_LIMIT_FOR_NIGHTFALL} conversations done — nightfall in ${NIGHTFALL_DELAY_MS / 1000}s`);
+        state.dayEndTimerActive = true;
+        console.log(`[Day] ${CONV_LIMIT_FOR_NIGHTFALL} conversations done — nightfall will start after current conversations finish`);
     }
 }
 
@@ -408,17 +407,16 @@ function tick() {
         else if (state.gamePhase === PHASE.VOTE)   { triggerExecute();   return; }
     }
 
-    // Conversation-limit nightfall: once the 1-min timer expires, lock new convs and watch for all to finish
+    // Conversation-limit nightfall: once conv limit is hit, lock new convs and wait for all to finish
     if (state.gamePhase === PHASE.DAY && state.dayEndTimerActive) {
-        const now = Date.now();
-        if (!state.noNewConversations && now >= state.dayEndTimerExpiresAt) {
+        if (!state.noNewConversations) {
             state.noNewConversations = true;
+            console.log(`[Day] Conversation limit reached — blocking new conversations, waiting for active ones to finish`);
         }
         if (state.noNewConversations) {
             // Force-abort any in-progress hosting so they can wind down this tick
             for (const p of living()) {
                 if (p.activity === 'hosting' || p.activity === 'visiting') {
-                    // Clear the AI drain and waiting flags so the hosting cleanup branch can fire
                     p._convTurns = [];
                     p.isWaiting  = false;
                     if (p.ticksLeft > 1) p.ticksLeft = 1;
@@ -661,8 +659,8 @@ function tick() {
         if (next === 'talking') {
             const TALK_COOLDOWN_MS = 60_000;
             const now = Date.now();
-            // Don't start new conversations if the nightfall lock or global conv lock is active
-            if (!state.noNewConversations && !state.activeConversation) {
+            // Don't start new conversations if the nightfall lock is active
+            if (!state.noNewConversations) {
             const nearby = [...free]
                 .filter(id => id !== gator.id)
                 .map(id => state.gators.find(p => p.id === id))
@@ -731,7 +729,7 @@ function tick() {
             next = 'moving';
         }
 
-        if (next === 'hosting' && !state.noNewConversations && !state.activeConversation) {
+        if (next === 'hosting' && !state.noNewConversations) {
         const TALK_COOLDOWN_MS = 60_000;
         const now = Date.now();
         const guest = [...free]
@@ -851,7 +849,7 @@ function tick() {
  *   - 'hosting':  Walk to door; once inside, drift gently within the enclosure bubble.
  *   - 'visiting': Walk to host's door; once inside, drift within host bubble.
  *   - 'debating': Walk toward debate target position (in front of house).
- *   - 'talking':  Close in toward partner; freeze when _conversationFrozen is true
+ *   - 'talking':  Close in toward partner during conversation.
  *                 (set by agentQueue while AI is in-flight or turns are playing back).
  *   - default:    Normal wandering toward targetX/targetY; picks new random target on arrival.
  *
@@ -966,12 +964,6 @@ function gameLoop() {
                     p.y = Math.max(0, Math.min(H, p.y + (dy/d) * p.speed));
                 }
             } else if (p.activity === 'talking') {
-                // Freeze gators completely during conversation
-                if (p._conversationFrozen) {
-                    // Do not move at all - stay completely frozen
-                    continue;
-                }
-
                 const partner = state.gators.find(q => q.id === p.talkingTo);
                 if (partner) {
                     const dx = (partner.x+cx)-(p.x+cx), dy = (partner.y+cx)-(p.y+cx);

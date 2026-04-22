@@ -26,6 +26,7 @@ public static class GameConfigProvider
             // GameConstants â€” scalars
             ["GATOR_SIZE"] = GameConstants.GatorSize,
             ["GATOR_COUNT"] = GameConstants.GatorCount,
+            ["MAX_CONCURRENT_CONVERSATIONS"] = GameConstants.MaxConcurrentConversations,
             ["CONV_LIMIT_FOR_NIGHTFALL"] = GameConstants.ConvLimitForNightfall,
             ["NIGHTFALL_DELAY_MS"] = GameConstants.NightfallDelayMs,
             ["TICK_MS"] = GameConstants.TickMs,

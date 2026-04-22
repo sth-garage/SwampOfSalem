@@ -118,6 +118,10 @@
                         <label for="gatorCountInput">Number of Gators:</label>
                         <input type="number" id="gatorCountInput" min="2" max="9" value="7" />
                     </div>
+                    <div class="gator-count-container">
+                        <label for="maxConvInput">Concurrent Conversations:</label>
+                        <input type="number" id="maxConvInput" min="1" max="5" value="2" />
+                    </div>
                     <div class="splash-buttons">
                         <button class="btn-primary" id="startGameBtn">▶ Start Game</button>
                         <button class="btn-secondary" id="testAiBtn">🔌 Test AI Connection</button>
@@ -234,12 +238,20 @@
             if (gatorCount > 9) gatorCount = 9;
             gatorCountInput.value = gatorCount; // Update display to show clamped value
 
+            // Get the user-selected concurrent conversation limit
+            const maxConvInput = document.getElementById('maxConvInput');
+            let maxConv = parseInt(maxConvInput.value, 10);
+            if (isNaN(maxConv) || maxConv < 1) maxConv = 1;
+            if (maxConv > 5) maxConv = 5;
+            maxConvInput.value = maxConv;
+
             // Load game config from server and set on window BEFORE importing any JS modules
             const cfgResp = await fetch('/api/game-config');
             window.GameConfig = await cfgResp.json();
 
-            // Override GATOR_COUNT with user selection
+            // Override GATOR_COUNT and MAX_CONCURRENT_CONVERSATIONS with user selections
             window.GameConfig.GATOR_COUNT = gatorCount;
+            window.GameConfig.MAX_CONCURRENT_CONVERSATIONS = maxConv;
 
             document.getElementById('splash').style.display = 'none';
             const dialogSource = configData?.dialogSource ?? 'AI';
@@ -274,11 +286,19 @@
             if (gatorCount > 9) gatorCount = 9;
             gatorCountInput.value = gatorCount;
 
+            // Get the user-selected concurrent conversation limit
+            const maxConvInput = document.getElementById('maxConvInput');
+            let maxConv = parseInt(maxConvInput.value, 10);
+            if (isNaN(maxConv) || maxConv < 1) maxConv = 1;
+            if (maxConv > 5) maxConv = 5;
+            maxConvInput.value = maxConv;
+
             const cfgResp = await fetch('/api/game-config');
             window.GameConfig = await cfgResp.json();
 
-            // Override GATOR_COUNT with user selection
+            // Override GATOR_COUNT and MAX_CONCURRENT_CONVERSATIONS with user selections
             window.GameConfig.GATOR_COUNT = gatorCount;
+            window.GameConfig.MAX_CONCURRENT_CONVERSATIONS = maxConv;
 
             document.getElementById('splash').style.display = 'none';
             const dialogSource = configData?.dialogSource ?? 'AI';

@@ -24,6 +24,14 @@ public static class GameConstants
     // ── Conversation limits ─────────────────────────────────────────────────────────────
 
     /// <summary>
+    /// Maximum number of AI conversations that may run concurrently.
+    /// Each active conversation occupies one slot; new conversations are blocked until
+    /// a slot frees up. Increase to allow livelier multi-pair chatter; reduce to 1
+    /// to serialise all conversations (original behaviour).
+    /// </summary>
+    public const int MaxConcurrentConversations = 2;
+
+    /// <summary>
     /// Total AI conversations that trigger the automatic nightfall countdown.
     /// Once this many full conversations complete during the Day phase,
     /// the nightfall timer (<see cref="NightfallDelayMs"/>) starts ticking.

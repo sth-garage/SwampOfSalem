@@ -191,8 +191,6 @@ export function createGator(index, house) {
         // _convIsPrivate:  Whether this is a hosting (private) conversation.
         // _convOnComplete: Callback fired after the last turn + 3-second hold.
         // _convHolding:    true during the 3-second post-conversation hold.
-        // _conversationFrozen: true while AI is thinking / turns are playing back.
-        //   When frozen, gameLoop() does NOT move this gator at all.
         isWaiting: false,   // true while the AI HTTP call is in-flight (shows spinning dots).
     };
 }

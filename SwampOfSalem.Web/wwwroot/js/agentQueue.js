@@ -8,13 +8,12 @@
  * This module is the "traffic controller" between the simulation and the
  * AI backend. It has three main responsibilities:
  *
- * 1. CONVERSATION MUTEX (global lock)
- *    Only one AI conversation can run at a time. `_conversationInProgress`
- *    is a boolean flag that acts like a lock. Once it's true, no other pair
- *    of gators can start a new AI conversation until the current one fully
- *    completes (last turn displayed + 3-second hold). This prevents two
- *    conversations from playing back simultaneously and causing chaos in
- *    the speech-bubble rendering.
+ * 1. CONVERSATION SLOT COUNTER (concurrency limit)
+ *    Up to MAX_CONCURRENT_CONVERSATIONS AI conversations may run at the same time.
+ *    `_activeConversations` tracks the current count. Once it reaches the limit,
+ *    no new conversations can start until one completes. This allows livelier
+ *    multi-pair chatter while still preventing an unbounded number of simultaneous
+ *    AI calls.
  *
  * 2. MEMORY BUFFER (batching for performance)
  *    Every time something notable happens (a conversation ends, a murder
@@ -35,18 +34,17 @@
  *
  * FLOW DIAGRAM:
  *
- *   simulation.js calls requestFullConversation(a, b, ...)
+   simulation.js calls requestFullConversation(a, b, ...)
  *       │
- *       ├─ Check _conversationInProgress → if true, return early (someone else is talking)
- *       ├─ Set _conversationInProgress = true
- *       ├─ Pause the simulation
+ *       ├─ Check _activeConversations >= MAX_CONCURRENT_CONVERSATIONS → if true, return early
+ *       ├─ Increment _activeConversations
  *       ├─ Flush pending memories to server (batch HTTP POST)
  *       ├─ Call agentBridge.getFullConversation(...)  ← single AI HTTP call
  *       │       ↓ (async — waiting for AI)
  *       ├─ Resume simulation
  *       ├─ Load turns onto initiator._convTurns[]
  *       ├─ Call _drainNextConvTurn() → show turn 1 → setTimeout → show turn 2 → ...
- *       └─ After last turn: 3s hold → onComplete() → _conversationInProgress = false
+ *       └─ After last turn: 3s hold → onComplete() → _activeConversations--
  *
  * @module agentQueue
  */
@@ -59,17 +57,16 @@ import { isAgentAvailable, getFullConversation, addAgentMemory, getNightReport, 
 import { state } from './state.js';
 import { living } from './gator.js';
 import { logChat } from './simulation.js';
-import { TICK_MS } from './gameConfig.js';
+import { TICK_MS, MAX_CONCURRENT_CONVERSATIONS } from './gameConfig.js';
 
 // _pending: Map of conversation keys → in-flight Promise.
 // Prevents the same pair from sending two concurrent requests.
 // Key format: "min(idA,idB):max(idA,idB):fullconv"
 const _pending = new Map();
 
-// _conversationInProgress: the global mutex.
-// true = an AI conversation is currently being fetched OR is being drained.
-// No new conversation can start while this is true.
-let _conversationInProgress = false;
+// _activeConversations: count of AI conversations currently in-flight or draining.
+// A new conversation can start as long as this is below MAX_CONCURRENT_CONVERSATIONS.
+let _activeConversations = 0;
 
 // _tickFunction: reference to simulation.js's tick() so agentQueue can
 // restart the tick interval after resuming without creating a circular import.
@@ -154,7 +151,7 @@ export function requestDialog() { /* intentionally empty */ }
  */
 export async function requestFullConversation(initiator, responder, openingLine, maxTurns = 6, context = null, isPrivate = false, onComplete = null) {
     if (!isAgentAvailable()) return;
-    if (_conversationInProgress) return;
+    if (_activeConversations >= MAX_CONCURRENT_CONVERSATIONS) return;
 
     const key = `${Math.min(initiator.id, responder.id)}:${Math.max(initiator.id, responder.id)}:fullconv`;
     if (_pending.has(key)) return;
@@ -163,41 +160,8 @@ export async function requestFullConversation(initiator, responder, openingLine,
     if (initiator._convTurns && initiator._convTurnIndex < initiator._convTurns.length) return;
     if (responder._convTurns && responder._convTurnIndex < responder._convTurns.length) return;
 
-    _conversationInProgress = true;
+    _activeConversations++;
 
-    // Position gators facing each other horizontally for conversation
-    // Calculate midpoint between them
-    const midX = (initiator.x + responder.x) / 2;
-    const midY = (initiator.y + responder.y) / 2;
-    const spacing = 100; // pixels apart horizontally
-
-    // Determine who goes left and who goes right (left-most stays left)
-    const leftGator = initiator.x < responder.x ? initiator : responder;
-    const rightGator = initiator.x < responder.x ? responder : initiator;
-
-    // Position them facing each other
-    leftGator.x = midX - spacing;
-    leftGator.y = midY;
-    leftGator.targetX = leftGator.x;
-    leftGator.targetY = leftGator.y;
-    leftGator._conversationFrozen = true;
-
-    rightGator.x = midX + spacing;
-    rightGator.y = midY;
-    rightGator.targetX = rightGator.x;
-    rightGator.targetY = rightGator.y;
-    rightGator._conversationFrozen = true;
-
-    // Pause the game while waiting for AI response
-    if (!state.paused) {
-        state.paused = true;
-        const pauseBtn = document.getElementById('pauseBtn');
-        if (pauseBtn) pauseBtn.textContent = '⏸ Paused (AI thinking...)';
-        if (state.tickInterval) {
-            clearInterval(state.tickInterval);
-            state.tickInterval = null;
-        }
-    }
 
     // Show thinking bubbles on both gators while waiting
     initiator.isWaiting = true;
@@ -221,22 +185,10 @@ export async function requestFullConversation(initiator, responder, openingLine,
                 console.warn(`⏭ Rejecting conversation with ${turns?.length ?? 0} message(s) — need at least 2 messages`);
                 console.warn(`   This likely means the AI returned malformed data or the server had an error.`);
                 console.warn(`   Check the server logs for "[ParseConversation]" messages to diagnose.`);
-                _conversationInProgress = false;
+                _activeConversations--;
                 state.activeConversation = false;
                 initiator.activity = 'moving'; initiator.talkingTo = null; initiator.message = null;
                 responder.activity = 'moving'; responder.talkingTo = null; responder.message = null;
-                initiator._conversationFrozen = false;
-                responder._conversationFrozen = false;
-
-                // Resume the game
-                if (state.paused) {
-                    state.paused = false;
-                    const pauseBtn = document.getElementById('pauseBtn');
-                    if (pauseBtn) pauseBtn.textContent = '⏸ Pause';
-                    if (!state.tickInterval && _tickFunction) {
-                        state.tickInterval = setInterval(_tickFunction, TICK_MS);
-                    }
-                }
                 return;
             }
 
@@ -247,16 +199,6 @@ export async function requestFullConversation(initiator, responder, openingLine,
                 const speaker = t.speakerGatorId === initiator.id ? initiator : responder;
                 console.log(`  [${i + 1}] ${speaker.name}: ${t.speech ?? ''}${t.thought ? ` (💭 ${t.thought})` : ''}`);
             });
-
-            // Resume the game now that AI response arrived
-            if (state.paused) {
-                state.paused = false;
-                const pauseBtn = document.getElementById('pauseBtn');
-                if (pauseBtn) pauseBtn.textContent = '⏸ Pause';
-                if (!state.tickInterval && _tickFunction) {
-                    state.tickInterval = setInterval(_tickFunction, TICK_MS);
-                }
-            }
 
             // Start playing back turns immediately
             initiator._convTurns      = turns;
@@ -270,22 +212,10 @@ export async function requestFullConversation(initiator, responder, openingLine,
             console.error('requestFullConversation failed:', err);
             initiator.isWaiting = false;
             responder.isWaiting = false;
-            _conversationInProgress = false;
+            _activeConversations--;
             state.activeConversation = false;
             initiator.activity = 'moving'; initiator.talkingTo = null; initiator.message = null;
             responder.activity = 'moving'; responder.talkingTo = null; responder.message = null;
-            initiator._conversationFrozen = false;
-            responder._conversationFrozen = false;
-
-            // Resume the game
-            if (state.paused) {
-                state.paused = false;
-                const pauseBtn = document.getElementById('pauseBtn');
-                if (pauseBtn) pauseBtn.textContent = '⏸ Pause';
-                if (!state.tickInterval && _tickFunction) {
-                    state.tickInterval = setInterval(_tickFunction, TICK_MS);
-                }
-            }
         });
 
     _pending.set(key, promise);
@@ -346,10 +276,6 @@ function _drainNextConvTurn(initiator, responder) {
             initiator.recentTalkWith[responder.id] = now;
             responder.recentTalkWith[initiator.id] = now;
 
-            // Unfreeze: gameLoop() may now move these gators again.
-            initiator._conversationFrozen = false;
-            responder._conversationFrozen = false;
-
             // Clean up all playback state.
             initiator._convTurns      = null;
             initiator._convPartner    = null;
@@ -359,8 +285,8 @@ function _drainNextConvTurn(initiator, responder) {
             initiator._convHolding    = false;
             responder._convHolding    = false;
 
-            // Release the global mutex so new conversations can start.
-            _conversationInProgress = false;
+            // Release a conversation slot so new conversations can start.
+            _activeConversations--;
 
             // Fire the completion callback (e.g. _onConversationCompleted in simulation.js).
             if (onComplete) onComplete();
