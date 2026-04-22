@@ -1,4 +1,56 @@
-﻿// ── Agent Queue ───────────────────────────────────────────────
+﻿/**
+ * @fileoverview agentQueue.js — AI request orchestration and memory buffering.
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * OVERVIEW FOR JUNIOR DEVELOPERS
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * This module is the "traffic controller" between the simulation and the
+ * AI backend. It has three main responsibilities:
+ *
+ * 1. CONVERSATION MUTEX (global lock)
+ *    Only one AI conversation can run at a time. `_conversationInProgress`
+ *    is a boolean flag that acts like a lock. Once it's true, no other pair
+ *    of gators can start a new AI conversation until the current one fully
+ *    completes (last turn displayed + 3-second hold). This prevents two
+ *    conversations from playing back simultaneously and causing chaos in
+ *    the speech-bubble rendering.
+ *
+ * 2. MEMORY BUFFER (batching for performance)
+ *    Every time something notable happens (a conversation ends, a murder
+ *    occurs, a vote is cast), recordMemory() is called. INSTEAD of sending
+ *    one HTTP request per event (which would be hundreds of requests per
+ *    game), memories are stored in `_memoryBuffer` (a Map of arrays keyed
+ *    by alligator ID). They are only flushed to the server in a single
+ *    batch request RIGHT BEFORE the next conversation starts. This keeps
+ *    network traffic low and ensures the AI always has fresh context before
+ *    it generates dialogue.
+ *
+ * 3. CONVERSATION PLAYBACK (turn-by-turn drain)
+ *    The AI returns ALL turns at once as a JSON array. Rather than showing
+ *    them all instantly, `_drainNextConvTurn()` shows them one at a time
+ *    with a 2.2–4 second delay between lines. This simulates a real-time
+ *    conversation. After the last turn, there is a 3-second final hold
+ *    before the `onComplete` callback fires and both gators are freed.
+ *
+ * FLOW DIAGRAM:
+ *
+ *   simulation.js calls requestFullConversation(a, b, ...)
+ *       │
+ *       ├─ Check _conversationInProgress → if true, return early (someone else is talking)
+ *       ├─ Set _conversationInProgress = true
+ *       ├─ Pause the simulation
+ *       ├─ Flush pending memories to server (batch HTTP POST)
+ *       ├─ Call agentBridge.getFullConversation(...)  ← single AI HTTP call
+ *       │       ↓ (async — waiting for AI)
+ *       ├─ Resume simulation
+ *       ├─ Load turns onto initiator._convTurns[]
+ *       ├─ Call _drainNextConvTurn() → show turn 1 → setTimeout → show turn 2 → ...
+ *       └─ After last turn: 3s hold → onComplete() → _conversationInProgress = false
+ *
+ * @module agentQueue
+ */
+// ── Agent Queue ───────────────────────────────────────────────
 // AI is used ONLY for full 2-gator conversations.
 // requestFullConversation() sets isWaiting on both gators (showing thinking
 // bubbles) while the AI call is in-flight, then plays back turns automatically.
@@ -9,38 +61,81 @@ import { living } from './gator.js';
 import { logChat } from './simulation.js';
 import { TICK_MS } from './gameConfig.js';
 
-// Track in-flight requests to avoid duplicate calls for the same pair
+// _pending: Map of conversation keys → in-flight Promise.
+// Prevents the same pair from sending two concurrent requests.
+// Key format: "min(idA,idB):max(idA,idB):fullconv"
 const _pending = new Map();
 
-// Global lock — only one conversation at a time across all gators
+// _conversationInProgress: the global mutex.
+// true = an AI conversation is currently being fetched OR is being drained.
+// No new conversation can start while this is true.
 let _conversationInProgress = false;
 
-// Store reference to tick function to avoid circular import issues
+// _tickFunction: reference to simulation.js's tick() so agentQueue can
+// restart the tick interval after resuming without creating a circular import.
+// Set via setTickFunction() which simulation.js calls at init.
 let _tickFunction = null;
 
+/**
+ * Stores a reference to the simulation tick function.
+ * Called once from simulation.js initSimulation() to break the circular
+ * import dependency (agentQueue imports simulation, simulation imports agentQueue).
+ * @param {Function} tickFn - The simulation tick() function.
+ */
 export function setTickFunction(tickFn) {
     _tickFunction = tickFn;
 }
 
 // ── Local memory buffer ───────────────────────────────────────
 // Memories are stored here and only flushed to the server when a conversation starts.
-const _memoryBuffer = new Map(); // alligatorId → [{day, type, detail, relatedId}, ...]
+// Key: alligatorId (number), Value: array of {day, type, detail, relatedId} entries.
+const _memoryBuffer = new Map();
 
+/**
+ * Adds one memory entry to the local buffer for a specific alligator.
+ * Does NOT touch the network — this is purely local storage.
+ * @param {number} alligatorId
+ * @param {number} day
+ * @param {string} type  - E.g. 'conversation', 'murder', 'voted', 'overheard'.
+ * @param {string} detail - Human-readable description of the event.
+ * @param {number|null} relatedId - ID of a related alligator (victim, suspect, etc.).
+ */
 function _bufferMemory(alligatorId, day, type, detail, relatedId) {
     if (!_memoryBuffer.has(alligatorId)) _memoryBuffer.set(alligatorId, []);
     _memoryBuffer.get(alligatorId).push({ day, type, detail, relatedId: relatedId ?? null });
 }
 
+/**
+ * Sends all buffered memories for one alligator to the server in a single
+ * batch HTTP POST, then clears the buffer.
+ *
+ * WHY flush before a conversation?
+ *   The AI agent uses its ChatHistory (which is stored server-side) to
+ *   contextualise its responses. If we flush memories right before a
+ *   conversation, the AI has the freshest possible context — it knows
+ *   about recent murders, votes, overheard gossip, etc. before it speaks.
+ *
+ * @param {number} alligatorId
+ * @returns {Promise<void>}
+ */
 async function _flushMemoriesForGator(alligatorId) {
     const entries = _memoryBuffer.get(alligatorId);
     if (!entries || entries.length === 0) return;
-    _memoryBuffer.delete(alligatorId); // clear before sending to avoid re-send on error
+    // Clear BEFORE sending — if the request fails, we won't retry,
+    // but we also won't send the same memories twice on the next flush.
+    _memoryBuffer.delete(alligatorId);
     await flushMemories(alligatorId, entries);
 }
 
 /**
  * No-op stub — AI dialog is not used outside of full conversations.
  * Callers that still reference this function are silently skipped.
+ *
+ * HISTORY NOTE: In early development, individual "requestDialog" calls were
+ * made for each gator independently. This was replaced by the batched
+ * requestFullConversation() approach which makes one AI call per conversation
+ * and returns all turns at once. This stub exists so callers that haven't
+ * been updated yet don't crash.
  */
 export function requestDialog() { /* intentionally empty */ }
 
@@ -207,45 +302,55 @@ export function drainNextConvTurn(initiator, responder) {
 }
 
 function _drainNextConvTurn(initiator, responder) {
+    // Grab the queued turns array. Returns early if there are no more turns to display.
     const turns = initiator._convTurns;
     if (!turns || initiator._convTurnIndex >= turns.length) return;
 
+    // Advance the cursor and get the current turn object.
     const turn = turns[initiator._convTurnIndex++];
     const isPrivate = !!initiator._convIsPrivate;
 
-    const speaker = turn.speakerGatorId === initiator.id ? initiator : responder;
+    // Determine who is speaking vs. who is listening this turn.
+    const speaker  = turn.speakerGatorId === initiator.id ? initiator : responder;
     const listener = turn.speakerGatorId === initiator.id ? responder : initiator;
+
+    // Update the speaker's visible speech bubble and log the chat.
     if (turn.speech && turn.speech.length > 0) {
         speaker.message = turn.speech;
-        // Log to both gators' chatLogs (private = no overhearing)
+        // logChat broadcasts the message to nearby observers and updates chatLogs.
+        // isPrivate=true means no overhearing (hosting conversations are private).
         logChat(speaker, listener.id, turn.speech, turn.thought ?? null, isPrivate);
     }
+
+    // Update the speaker's thought bubble (visible only in the info panel).
     if (turn.thought) {
         speaker.thought = turn.thought;
     }
 
-    // Schedule the next turn automatically
     if (initiator._convTurnIndex < turns.length) {
-        const ms = 2200 + Math.random() * 1800; // 2.2–4 s between lines
+        // Schedule the next turn with a 2.2–4 second human-feeling delay.
+        const ms = 2200 + Math.random() * 1800;
         setTimeout(() => _drainNextConvTurn(initiator, responder), ms);
     } else {
-        // All turns displayed — hold 3 s, then fire onComplete and clean up
+        // ── All turns displayed ─────────────────────────────────────────────
+        // Hold the gators in place for 3 more seconds so players can read
+        // the last line before the speech bubbles disappear.
         const onComplete = initiator._convOnComplete ?? null;
-        // Set flag to keep gators in place during final hold
-        initiator._convHolding = true;
+        initiator._convHolding = true;   // Keep simulation.js from moving these gators.
         responder._convHolding = true;
         setTimeout(() => {
-            // Update recentTalkWith timestamps to enforce cooldown between conversations
+            // Update recentTalkWith timestamps to enforce the 60-second cooldown.
             const now = Date.now();
             if (!initiator.recentTalkWith) initiator.recentTalkWith = {};
             if (!responder.recentTalkWith) responder.recentTalkWith = {};
             initiator.recentTalkWith[responder.id] = now;
             responder.recentTalkWith[initiator.id] = now;
 
-            // Unfreeze gators so they can move again
+            // Unfreeze: gameLoop() may now move these gators again.
             initiator._conversationFrozen = false;
             responder._conversationFrozen = false;
 
+            // Clean up all playback state.
             initiator._convTurns      = null;
             initiator._convPartner    = null;
             initiator._convTurnIndex  = 0;
@@ -253,7 +358,11 @@ function _drainNextConvTurn(initiator, responder) {
             initiator._convOnComplete = null;
             initiator._convHolding    = false;
             responder._convHolding    = false;
+
+            // Release the global mutex so new conversations can start.
             _conversationInProgress = false;
+
+            // Fire the completion callback (e.g. _onConversationCompleted in simulation.js).
             if (onComplete) onComplete();
         }, 3000);
     }
@@ -261,6 +370,16 @@ function _drainNextConvTurn(initiator, responder) {
 
 /**
  * Record a memory/event for an agent — stored locally and flushed when a conversation starts.
+ *
+ * This is a very frequently called function. It is intentionally synchronous
+ * and cheap (just a Map.push). The expensive network flush happens lazily in
+ * requestFullConversation() → _flushMemoriesForGator().
+ *
+ * @param {number} alligatorId - Which gator this memory belongs to.
+ * @param {number} day         - The current game day number.
+ * @param {string} type        - Short category tag (e.g. 'murder', 'voted', 'overheard').
+ * @param {string} detail      - Full human-readable description sent to the AI.
+ * @param {number|null} relatedId - Another gator's ID relevant to this event, or null.
  */
 export function recordMemory(alligatorId, day, type, detail, relatedId = null) {
     _bufferMemory(alligatorId, day, type, detail, relatedId);
@@ -269,6 +388,11 @@ export function recordMemory(alligatorId, day, type, detail, relatedId = null) {
 /**
  * Request agent-driven vote — no longer AI-driven; always returns null so the
  * caller falls back to its local JS logic.
+ *
+ * HISTORY NOTE: Early versions called POST /api/agent/vote here. Voting was
+ * moved to a pure JS fallback (decideVote() in phases.js) because the AI
+ * was too slow for the sequential voting ceremony — one HTTP round trip per
+ * voter made the vote phase take many seconds.
  */
 export async function requestVote() {
     return null;
@@ -280,7 +404,22 @@ export async function requestVote() {
  * Fetch the night AI report for all living gators, show the night screen
  * panel, and resolve only after the user clicks "Continue to Morning."
  *
- * @returns {Promise<void>}
+ * PURPOSE:
+ *   After the murderer strikes, all living gators reflect on the day:
+ *   who they suspect, why, and what their inner thought is. The night-report
+ *   panel displays these reflections as a clickable list so the player can
+ *   read each gator's private perspective.
+ *
+ * FLOW:
+ *   1. Show the night-report overlay with a "loading…" message.
+ *   2. Flush all buffered memories for every living gator (so the AI
+ *      has current context for its reflections).
+ *   3. Call agentBridge.getNightReport(aliveIds) → batch AI call.
+ *   4. Render the gator list + clickable detail panels.
+ *   5. Wait for the user to click "Continue to Morning."
+ *   6. Hide the overlay and resolve the Promise (caller: triggerNightfall).
+ *
+ * @returns {Promise<void>} Resolves when the user dismisses the night screen.
  */
 export function requestNightReport() {
     return new Promise(async resolve => {

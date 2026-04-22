@@ -1,4 +1,29 @@
-﻿import {
+﻿/**
+ * @fileoverview rendering.js — All DOM read/write operations for the simulation UI.
+ *
+ * This module owns the visual layer. No other module should directly manipulate
+ * DOM elements — they call functions from here instead.
+ *
+ * Key responsibilities:
+ *
+ *   renderGator(gator)           Positions and updates one gator's SVG sprite on canvas.
+ *   renderAllGators()            Calls renderGator() for every living gator each frame.
+ *   updateStats()                Refreshes the activity count bar at the top.
+ *   updatePhaseLabel()           Updates the phase label and nightfall countdown timer.
+ *   updateHouseGuests()          Refreshes the in-house guest list overlay per house.
+ *   syncTalkLines()              Draws/removes SVG lines between talking pairs.
+ *   initTooltip()                Sets up the hover-detail tooltip for gator inspection.
+ *   showTooltip(gator, x, y)     Renders the full stat card tooltip for a gator.
+ *   moveTooltip(x, y)            Moves a visible tooltip to follow the cursor.
+ *   hideTooltip()                Hides the floating tooltip.
+ *   pinTooltip(gator)            Pins the tooltip so it stays visible after mouse-out.
+ *   refreshPinnedTooltip()       Re-renders a pinned tooltip with fresh data.
+ *   cleanPrivateChatBubbles()    Removes stale private-chat enclosures from the DOM.
+ *   showDeadBody(gatorName, x,y) Displays a "💀 died" marker at the death location.
+ *
+ * @module rendering
+ */
+import {
     GATOR_SIZE, PHASE, ACTIVITY_EMOJI, PERSONALITY_EMOJI,
     MOOD_MATRIX, MOOD_EMOJI, GATOR_COUNT, DAY_TICKS, TICK_MS, HOME_WARN_TICKS
 } from './gameConfig.js';

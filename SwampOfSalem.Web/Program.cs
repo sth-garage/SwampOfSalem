@@ -1,9 +1,36 @@
-﻿using SwampOfSalem.Shared.DTOs;
+﻿// ════════════════════════════════════════════════════════════════════════════════
+// Swamp of Salem — ASP.NET Core Minimal API Host
+// ════════════════════════════════════════════════════════════════════════════════
+//
+// This file is the entire server. There are no controllers — every endpoint is a
+// one-liner lambda registered directly on the WebApplication (Minimal API style).
+//
+// Service registration order:
+//   1. Semantic Kernel (AddKernel)
+//   2. LLM provider (Azure OpenAI or OpenAI-compatible, read from appsettings.json)
+//   3. GameState singleton  — shared mutable game session snapshot
+//   4. GatorAgentService singleton — owns all SK agents and their chat histories
+//
+// Endpoint groups:
+//   POST /api/agent/*  — AI agent actions (dialog, vote, memory, conversation, etc.)
+//   GET  /api/game-config — serialises all C# game constants to JSON for the JS client
+//   GET  /api/config      — returns the active LLM provider info for the test panel
+//
+// Static files (wwwroot/) are served by UseDefaultFiles + UseStaticFiles.
+// The entire frontend is plain HTML + ES-module JavaScript; no Blazor/React.
+//
+// ════════════════════════════════════════════════════════════════════════════════
+using SwampOfSalem.Shared.DTOs;
 using SwampOfSalem.Shared.Models;
 using SwampOfSalem.SK.Agents;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 
+// ── LLM Provider configuration ────────────────────────────────────────────────
+// The active provider is selected via "LLM:Provider" in appsettings.json.
+// Supported values: "OpenAI" (default, also works with local LM Studio / Ollama)
+//                   "AzureOpenAI"
+// ⚠️  Never commit real API keys in appsettings.json — use dotnet user-secrets instead.
 var builder = WebApplication.CreateBuilder(args);
 
 // LLM provider configuration
@@ -48,8 +75,9 @@ var app = builder.Build();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-// â”€â”€ API Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
+// ── API Endpoints ───────────────────────────────────────────────────────────
+// All agent endpoints live under /api/agent and delegate to GatorAgentService.
+//
 var api = app.MapGroup("/api/agent");
 
 api.MapPost("/initialize", (AlligatorSpawnData[] alligators, GatorAgentService agents) =>

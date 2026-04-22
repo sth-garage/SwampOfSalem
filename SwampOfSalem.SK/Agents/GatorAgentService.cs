@@ -11,8 +11,33 @@ using System.Collections.Concurrent;
 namespace SwampOfSalem.SK.Agents;
 
 /// <summary>
-/// Manages Semantic Kernel agents for each alligator.
-/// Each agent has its own ChatHistory (memory), personality prompt, and plugins.
+/// Central AI orchestration service for the Swamp of Salem simulation.
+/// <para>
+/// <b>Architecture overview</b><br/>
+/// Each living alligator is backed by a Semantic Kernel <see cref="ChatCompletionAgent"/>
+/// with its own isolated <see cref="ChatHistory"/> (in-process memory). The agents
+/// share a single <see cref="Kernel"/> instance (and therefore a single LLM connection)
+/// but each agent gets a cloned kernel with its own <see cref="SwampPlugin"/> instance
+/// so plugin calls stay scoped to the correct gator.
+/// </para>
+/// <para>
+/// <b>Data flows</b>
+/// <list type="number">
+///   <item><description>JS calls <c>POST /api/agent/initialize</c> → <see cref="InitializeFromSpawnData"/> creates <see cref="Alligator"/> objects and SK agents.</description></item>
+///   <item><description>JS calls <c>POST /api/agent/dialog</c> → <see cref="GenerateDialogAsync"/> returns spoken text + thought.</description></item>
+///   <item><description>JS calls <c>POST /api/agent/conversation</c> → <see cref="GenerateFullConversationAsync"/> returns a full multi-turn exchange in one AI call.</description></item>
+///   <item><description>JS calls <c>POST /api/agent/memory</c> → <see cref="AddMemory"/> injects observations into the agent's history.</description></item>
+///   <item><description>JS calls <c>POST /api/agent/vote</c> → <see cref="GetVoteAsync"/> returns the gator's clockwise vote decision.</description></item>
+///   <item><description>JS calls <c>POST /api/agent/night-report</c> → <see cref="GenerateNightReportAsync"/> returns all gators' night reflections in parallel.</description></item>
+/// </list>
+/// </para>
+/// <para>
+/// <b>Thread safety</b><br/>
+/// All three concurrent dictionaries (<c>_agents</c>, <c>_histories</c>, <c>_memories</c>)
+/// use <see cref="ConcurrentDictionary{TKey,TValue}"/> to safely handle parallel
+/// night-report generation and any future multi-user expansion. The <c>GameState</c>
+/// singleton itself is mutated only on the synchronous server request thread.
+/// </para>
 /// </summary>
 public class GatorAgentService
 {
@@ -30,9 +55,18 @@ public class GatorAgentService
     }
 
     /// <summary>
-    /// Initialize agents from spawn data.
-    /// Populates GameState.Alligators and creates SK agents for each.
+    /// Initialize agents from spawn data sent by the JavaScript frontend.
+    /// <para>
+    /// This method:
+    /// <list type="number">
+    ///   <item><description>Resets <see cref="GameState"/> to a clean Day 1 state.</description></item>
+    ///   <item><description>Converts each <see cref="AlligatorSpawnData"/> DTO into an <see cref="Alligator"/> domain object.</description></item>
+    ///   <item><description>Calls <see cref="InitializeAgents"/> to create one SK agent per living gator.</description></item>
+    ///   <item><description>Injects AI-generated topic opinion context into each agent's <see cref="ChatHistory"/> as a system message so the agent can reference them naturally in dialogue.</description></item>
+    /// </list>
+    /// </para>
     /// </summary>
+    /// <param name="spawnData">Array of spawn DTOs sent from <c>POST /api/agent/initialize</c>.</param>
     public void InitializeFromSpawnData(IEnumerable<AlligatorSpawnData> spawnData)
     {
         _gameState.Alligators.Clear();
@@ -83,7 +117,11 @@ public class GatorAgentService
     }
 
     /// <summary>
-    /// Initialize or re-initialize agents for all living alligators.
+    /// (Re-)initializes SK agents for all currently living alligators.
+    /// Clears the <c>_agents</c>, <c>_histories</c>, and <c>_memories</c> dictionaries
+    /// and creates a fresh <see cref="ChatCompletionAgent"/> for each alive gator.
+    /// Called internally by <see cref="InitializeFromSpawnData"/> and can be called
+    /// externally to reset agent state without changing game state.
     /// </summary>
     public void InitializeAgents()
     {
@@ -124,8 +162,12 @@ public class GatorAgentService
     }
 
     /// <summary>
-    /// Add a memory to an alligator's history (own action or observed event).
+    /// Adds a memory to an alligator's in-process memory list <b>and</b> injects it
+    /// into the agent's <see cref="ChatHistory"/> as a system message so the agent
+    /// can reference it in future responses.
     /// </summary>
+    /// <param name="alligatorId">ID of the alligator receiving the memory.</param>
+    /// <param name="memory">The memory entry to add.</param>
     public void AddMemory(int alligatorId, MemoryEntry memory)
     {
         var memories = _memories.GetOrAdd(alligatorId, _ => []);
@@ -139,8 +181,21 @@ public class GatorAgentService
     }
 
     /// <summary>
-    /// Generate dialog for a 1:1 or small group conversation.
+    /// Asks one alligator agent to generate a contextual dialog response.
+    /// <para>
+    /// The method builds a context message from the game state (phase, day, target
+    /// relationship, dialog-type instructions) and appends it to the agent's
+    /// <see cref="ChatHistory"/>. The LLM must return a JSON object:
+    /// <code>{"spoken": "...", "thought": "..."}</code>
+    /// </para>
+    /// <para>
+    /// Parsing is defensive — if the model returns malformed JSON the method
+    /// falls back to extracting the first sensible plain-text line.
+    /// The spoken text is recorded as a new memory entry for the agent.
+    /// </para>
     /// </summary>
+    /// <param name="request">Describes who speaks, what type of dialog, and optional context.</param>
+    /// <returns>The agent's spoken message and private thought.</returns>
     public async Task<AgentDialogResponse> GenerateDialogAsync(AgentDialogRequest request)
     {
         if (!_agents.TryGetValue(request.AlligatorId, out var agent))
@@ -206,8 +261,13 @@ public class GatorAgentService
     }
 
     /// <summary>
-    /// Run a debate round where all agents respond to the current debate state.
-    /// All agents "speak" based on the same context (simultaneous roundtable).
+    /// Runs a debate round where all participants generate a response simultaneously.
+    /// <para>
+    /// All agents are given the same debate context (previous messages, victim info)
+    /// and respond in parallel using <see cref="Task.WhenAll"/>. This simulates a
+    /// simultaneous roundtable — everyone hears the same debate history and forms
+    /// their own in-character response.
+    /// </para>
     /// </summary>
     public async Task<DebateRoundResponse> RunDebateRoundAsync(DebateRoundRequest request)
     {
@@ -244,8 +304,13 @@ public class GatorAgentService
     }
 
     /// <summary>
-    /// Get an agent's vote decision. Votes happen one at a time, clockwise.
-    /// Each voter sees all previous votes.
+    /// Gets a single alligator's vote decision for the current Vote phase.
+    /// <para>
+    /// The agent receives the debate summary and a list of candidate names/IDs.
+    /// It must respond in the format <c>ID|reason</c> (e.g. <c>3|They were near the victim</c>).
+    /// The vote is recorded as a memory entry so the agent remembers who they voted for.
+    /// Votes happen one at a time, clockwise, driven by <c>VoteService.EstablishVoteOrder()</c>.
+    /// </para>
     /// </summary>
     public async Task<VoteResponse> GetVoteAsync(VoteRequest request)
     {
@@ -393,8 +458,17 @@ public class GatorAgentService
     };
 
     /// <summary>
-    /// Generate a complete back-and-forth conversation between two alligators in a single AI call.
-    /// The initiator's opening line is provided; the AI fills in all subsequent turns (up to maxTurns).
+    /// Generates a complete multi-turn conversation between two alligators in a <b>single</b> AI call.
+    /// <para>
+    /// Rather than making N round-trip API calls (one per turn), this method sends a single
+    /// structured prompt asking the LLM to produce all turns at once as a JSON array.
+    /// This is significantly faster and reduces token overhead from repeated context re-injection.
+    /// </para>
+    /// <para>
+    /// The initiator's opening line is always included as the first message. The method
+    /// clamps <c>MaxTurns</c> to the range [5, 9] to keep conversations a readable length.
+    /// Both gators receive memory entries for every line they speak.
+    /// </para>
     /// </summary>
     public async Task<ChatConversationResponse> GenerateFullConversationAsync(ChatConversationRequest request)
     {
@@ -558,8 +632,17 @@ public class GatorAgentService
     }
 
     /// <summary>
-    /// Generate a night-time reflection for all living alligators in parallel.
-    /// Each gator reports who they suspect most and why.
+    /// Generates night-time reflections for all living alligators in parallel.
+    /// <para>
+    /// Each gator is asked who they suspect most and why, given their memories and
+    /// current relationship/suspicion scores. All requests are fired with
+    /// <see cref="Task.WhenAll"/> so the Night phase remains fast even with 6 agents.
+    /// </para>
+    /// <para>
+    /// Unlike <see cref="GenerateDialogAsync"/>, this method uses the raw
+    /// <c>IChatCompletionService</c> directly (no agent wrapper) because night
+    /// reflections don't need plugin access or persistent chat history.
+    /// </para>
     /// </summary>
     public async Task<NightReportResponse> GenerateNightReportAsync(List<int> aliveIds)
     {

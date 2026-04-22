@@ -1,4 +1,23 @@
-﻿// ── Game Config ────────────────────────────────────────────────
+﻿/**
+ * @fileoverview gameConfig.js — Game constants bridge between C# and JavaScript.
+ *
+ * ALL tuning values for the simulation originate in the C# AppLogic project
+ * (GameConstants, PersonalityConstants, AppearanceConstants, RelationshipConstants)
+ * and are serialised to JSON by GameConfigProvider.GetConfigJson() at startup.
+ *
+ * The server injects this JSON into the HTML as:
+ *   window.GameConfig = <json>;
+ * before any ES module is loaded, so this module can safely destructure it
+ * and re-export every constant with the same name as the old hard-coded
+ * constants.js did — zero changes required in consuming modules.
+ *
+ * ⚠️  NEVER hard-code game values directly in JavaScript. Change the C# constants
+ *     and the new values will propagate here automatically on next page load.
+ *
+ * @module gameConfig
+ */
+
+// ── Game Config ────────────────────────────────────────────────
 // All constants are injected from C# (GameConfigProvider) into
 // window.GameConfig BEFORE this module is imported.
 // We destructure once at module load and re-export with the

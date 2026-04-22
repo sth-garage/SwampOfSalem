@@ -1,20 +1,82 @@
-﻿import {
+﻿/**
+ * @fileoverview helpers.js — Pure utility functions and topic/appearance data.
+ *
+ * This module contains:
+ *
+ *   Random helpers:
+ *     rnd(n)              Integer 0..n-1
+ *     rndF(n)             Float 0..n
+ *     hsl()               Random bright HSL color string
+ *     rndTicks(activity)  Random tick count for given activity from ACTIVITY_TICKS ranges
+ *
+ *   Topics & opinions:
+ *     TOPICS              Array of 4 conversation topic keys
+ *     TOPIC_LABELS        Human-readable emoji labels for each topic
+ *     SPORTS_TEAMS        Local team names (Rockets, Jets) + out-of-town (Chowda)
+ *     generateTopicOpinions(personality)  Creates an opinion map for a new gator
+ *     topicCompatibility(a,b,topic)       Returns alignment score for two gators on a topic
+ *     applyTopicRelationDelta(a,b,topic)  Nudges relations based on topic agreement
+ *
+ *   Appearance & layout:
+ *     randomAppearance(index)    Picks skin tone, hat, shirt colour for a new gator
+ *     culdesacLayout(n, W, H)   Calculates house positions in a culde-sac ring
+ *     stageBounds()              Returns {W, H} of the #world element
+ *     buildFigureSVG(gator)      Generates the gator's SVG sprite string
+ *     buildCuldesacSVG(houses)   Generates the static culde-sac road SVG
+ *
+ *   Timing helpers:
+ *     speakDelayMs(text)        Delay before a speech bubble appears (~reading speed)
+ *     thoughtDelayMs(text)      Delay before a thought bubble appears
+ *
+ *   Display helpers:
+ *     relationEmoji(val)        Returns ❤️/💛/🤍/💔 based on relation score
+ *     relationColor(val)        Returns CSS colour for a relation score
+ *
+ * @module helpers
+ */
+import {
     GATOR_SIZE, GATOR_COUNT, PERSONALITIES, ACTIVITY_TICKS, WALK_SPEED,
     SKIN_TONES, HAT_STYLES, SHIRT_COLORS, HOUSE_COLORS, NAMES,
     PERSONALITY_EMOJI
 } from './gameConfig.js';
 
 // ── Random helpers ────────────────────────────────────────────
+/**
+ * Returns a random integer in [0, n-1].
+ * The `n` parameter is the exclusive upper bound (like array.length).
+ * Example: rnd(6) returns 0, 1, 2, 3, 4, or 5.
+ */
 export const rnd  = n => Math.floor(Math.random() * n);
+
+/**
+ * Returns a random float in [0, n].
+ * Used for pixel positions and jitter where fractional values are fine.
+ */
 export const rndF = n => Math.random() * n;
+
+/**
+ * Returns a random bright HSL color string like "hsl(217, 72%, 58%)".
+ * Used for gator accent colors and speech bubble tints.
+ * The saturation (55–85%) and lightness (45–65%) ranges keep colors vivid
+ * but not neon — they work well against the dark swamp background.
+ */
 export const hsl  = () => `hsl(${rnd(360)},${55+rnd(30)}%,${45+rnd(20)}%)`;
+
+/**
+ * Returns a random tick count for a given activity type.
+ * Reads the [min, max] range from ACTIVITY_TICKS (imported from gameConfig.js)
+ * and returns min + random value within the range.
+ *
+ * @param {string} activity - 'moving' | 'talking' | 'hosting' | 'visiting'
+ * @returns {number} Tick count (1 tick = TICK_MS milliseconds of simulation time)
+ */
 export const rndTicks = a => { const [mn,mx] = ACTIVITY_TICKS[a]; return mn + rnd(mx-mn+1); };
 
 
 // ── Topics & opinions ─────────────────────────────────────────
 // The four conversation topics gators discuss while socialising.
 // Sports: Rockets and Jets are the local teams; Chowda fans are out-of-towners
-// looked down upon by Rockets/Jets fans.
+// looked down upon by Rockets/Jets fans — this creates friction and bonding.
 export const TOPICS = [
     'sports_team',              // Rockets, Jets, or Chowda (out-of-town)
     'local_gossip',             // sharing rumours and opinions about others
@@ -35,10 +97,28 @@ export const SPORTS_TEAMS = ['Rockets', 'Jets', 'Chowda'];
 
 /**
  * Generate a random opinion set for a new alligator across all 4 topics.
- * Returns an object: { topic: opinionValue, ... }
- * Opinions are personality-influenced.
+ *
+ * ALGORITHM:
+ *   Each topic gets a numeric opinion score -100..+100 (except sports_team
+ *   which is a string team name).
+ *
+ *   Personality bias shifts the mean:
+ *     cheerful  → +30 (optimistic about everything)
+ *     grumpy    → -30 (pessimistic about everything)
+ *     extrovert → +20 (socially positive, likes sharing topics)
+ *     paranoid  → -20 (distrustful)
+ *     (etc.)
+ *
+ *   The raw score is:  Random(-100..+100)  +  bias * (0.5..1.0)
+ *   Then clamped to [-100, +100].
+ *
+ *   Sports team assignment:
+ *     42% → Rockets (local, majority)
+ *     43% → Jets    (local, minority)
+ *     15% → Chowda  (out-of-town — creates tension with locals)
+ *
  * @param {string} personality
- * @returns {Object.<string,number>}
+ * @returns {Object.<string,number|string>} Map of topic → opinion value or team string.
  */
 export function generateTopicOpinions(personality) {
     const opinions = {};
@@ -68,10 +148,26 @@ export function generateTopicOpinions(personality) {
 
 /**
  * Compute a compatibility score [-100, 100] between two alligators based on
- * shared topic opinions.  Handles both numeric opinions and sports_team string.
- * @param {Object} opinionsA
- * @param {Object} opinionsB
- * @returns {number}
+ * shared topic opinions.
+ *
+ * ALGORITHM:
+ *   For each shared topic:
+ *     - sports_team: handled specially by _sportsTeamCompat()
+ *     - numeric topics: score = 100 - |opinionA - opinionB|
+ *         (same opinion → score near 100, opposite → score near -100)
+ *
+ *   Final = average of all topic scores.
+ *
+ * WHY this matters:
+ *   topicCompatibility() is used at FIRST MEETING to seed the initial
+ *   relationship score. Two gators who agree on everything start with
+ *   a positive relationship; two who disagree on everything start negative.
+ *   This creates emergent friend groups and enemy pairs without any
+ *   hand-scripted drama.
+ *
+ * @param {Object} opinionsA - Topic opinion map from gator A.
+ * @param {Object} opinionsB - Topic opinion map from gator B.
+ * @returns {number} Compatibility score from -100 (totally opposed) to +100 (perfectly aligned).
  */
 export function topicCompatibility(opinionsA, opinionsB) {
     const shared = Object.keys(opinionsA).filter(t => t in opinionsB);
@@ -88,19 +184,55 @@ export function topicCompatibility(opinionsA, opinionsB) {
     return Math.round(total / shared.length);
 }
 
-/** Sports team compatibility: same team = +80, local vs Chowda = –60, Jets vs Rockets = –10 */
+/**
+ * Private helper — sports team compatibility lookup table.
+ *
+ * DESIGN NOTE — why separate function?
+ *   Sports team is a string, not a number, so it can't use the generic
+ *   `100 - |a - b|` formula. This function encapsulates the special-case
+ *   logic and is called by both topicCompatibility() (first-meeting seed)
+ *   and applyTopicRelationDelta() (post-hosting nudge).
+ *
+ * SCORES:
+ *   +80  Same team → strong bond ("We're both Rockets fans!")
+ *   -10  Two local teams (Rockets vs Jets) → mild rivalry, still respected
+ *   -60  One is a Chowda fan → local fans look down on out-of-towners
+ *
+ * @param {string} teamA - Team name for gator A.
+ * @param {string} teamB - Team name for gator B.
+ * @returns {number} Compatibility contribution for this topic.
+ */
 function _sportsTeamCompat(teamA, teamB) {
-    if (teamA === teamB) return 80;
-    const chowda = teamA === 'Chowda' || teamB === 'Chowda';
-    return chowda ? -60 : -10;
+    if (teamA === teamB) return 80;                                // Both cheer for same team
+    const chowda = teamA === 'Chowda' || teamB === 'Chowda';     // Out-of-towner present?
+    return chowda ? -60 : -10;                                    // Chowda tension vs. local rivalry
 }
 
 /**
  * Apply a relation delta between two gators based on how their topic opinions aligned
- * during a hosting conversation. Call this after the conversation finishes.
- * @param {object} a - gator
- * @param {object} b - gator
- * @returns {{ delta: number, reasons: string[] }} delta applied to both, and human-readable reasons
+ * during a hosting (private) conversation. Called by simulation.js AFTER a hosting
+ * session ends, just before the guest leaves.
+ *
+ * WHY hosting-only?
+ *   Regular street conversations use the generic driftRelations() function.
+ *   Hosting is a deeper, longer interaction so it gets an additional structured
+ *   topic-based bond/friction on top of the standard drift.
+ *
+ * ALGORITHM — four topics are scored independently, then summed:
+ *   1. Sports team    → ±9 to ±12  (scaled by 0.15 from _sportsTeamCompat)
+ *   2. Local gossip   → ±0 to ±8   (how similar their gossip-sharing values are)
+ *   3. Swamp leadership → ±0 to ±10 (agree = positive, disagree = negative, scaled by strength)
+ *   4. Fav. activity  → ±0 to ±6   (how similar their activity preferences are)
+ *
+ *   Total delta range: roughly -33 to +36 (though extreme values are rare).
+ *   Delta is applied symmetrically to BOTH gators' relations and clamped to [-100, +100].
+ *
+ * SIDE EFFECT — returns a debug-friendly `reasons` array so the console can log
+ *   why the relationship changed (e.g. "Both support the Rockets! (+12)").
+ *
+ * @param {object} a - First gator (Person object).
+ * @param {object} b - Second gator (Person object).
+ * @returns {{ delta: number, reasons: string[] }}
  */
 export function applyTopicRelationDelta(a, b) {
     const ao = a.topicOpinions ?? {};
@@ -170,9 +302,22 @@ export function applyTopicRelationDelta(a, b) {
 }
 
 /**
- * Build a human-readable summary of an alligator's topic opinions for the AI.
- * @param {Object} opinions
- * @returns {string}
+ * Builds a compact, human-readable sentence describing a gator's topic opinions.
+ * Used as context injected into the AI system prompt so the LLM "knows" what
+ * the alligator cares about before generating dialog.
+ *
+ * LABEL THRESHOLDS (numeric topics):
+ *   ≥  60  → "loves"
+ *   ≥  20  → "likes"
+ *   ≥ -20  → "is neutral about"
+ *   ≥ -60  → "dislikes"
+ *   <  -60 → "hates"
+ *
+ * EXAMPLE output:
+ *   "supports Rockets; likes local gossip; dislikes swamp leadership; loves swamp activities"
+ *
+ * @param {Object} opinions - topicOpinions map from a Person object.
+ * @returns {string} Comma-separated summary sentence.
  */
 export function topicOpinionSummary(opinions) {
     return Object.entries(opinions)
@@ -184,68 +329,215 @@ export function topicOpinionSummary(opinions) {
         .join('; ');
 }
 
-// Pick from a personality-bucketed object: { cheerful:[...], grumpy:[...], ... }
+/**
+ * Picks a random element from a personality-bucketed lookup object.
+ *
+ * A "bucketed" object looks like:
+ *   { cheerful: ['line A', 'line B'], grumpy: ['line C'], ... }
+ *
+ * If the exact personality key doesn't exist, it falls back to 'cheerful',
+ * then to the first available key. This makes it safe to add new personalities
+ * without needing to update every bucketed structure.
+ *
+ * Usage pattern in the codebase:
+ *   const line = pickBucketed(REACTION_LINES, gator.personality);
+ *
+ * @param {Object} bucket - Personality-keyed object of arrays.
+ * @param {string} personality - The gator's personality key.
+ * @returns {*} A random element from the matching bucket.
+ */
 export function pickBucketed(bucket, personality) {
     const pool = bucket[personality] || bucket.cheerful || Object.values(bucket)[0];
     return pool[rnd(pool.length)];
 }
 
 // ── Real-time scheduling helpers ──────────────────────────────
-// Returns ms until this gator's next thought update.
-// Higher thoughtStat → shorter interval; wide variance prevents sync.
+// These functions replace the old tick-count timers with millisecond timestamps.
+// Using Date.now() means timing is consistent regardless of tab focus or tick
+// rate variability. Both functions introduce wide random variance (~50–150% of
+// the base) to prevent multiple gators from thinking or speaking at exactly
+// the same moment (the "thundering herd" problem for speech bubbles).
+
+/**
+ * Returns the number of milliseconds until this gator should generate their
+ * next inner thought. Gators with a high thoughtStat think more frequently.
+ *
+ * FORMULA:
+ *   base = 20,000 / max(1, thoughtStat)   → thoughtStat 10 ≈ 2,000ms, thoughtStat 1 ≈ 20,000ms
+ *   result = max(1200, base * (0.5..1.5)) → at least 1.2 seconds; wide variance
+ *
+ * WHY 20,000 / thoughtStat?
+ *   Inverse relationship: higher stat = shorter interval = thinks more often.
+ *   Dividing by thoughtStat directly gives a smooth curve from
+ *   "very rarely" (thoughtStat=1 → ~20s base) to "quite often" (thoughtStat=10 → ~2s base).
+ *
+ * @param {number} thoughtStat - Gator's perception/thought score (1–10).
+ * @returns {number} Milliseconds until next thought.
+ */
 export function thoughtDelayMs(thoughtStat) {
     const base = Math.round(20000 / Math.max(1, thoughtStat));
     return Math.max(1200, Math.round(base * (0.5 + Math.random() * 1.0)));
 }
 
-// Returns ms until this gator can send their next speech line.
-// Higher socialStat → shorter cooldown; wide variance prevents sync.
+/**
+ * Returns the number of milliseconds until this gator can speak again during
+ * a debate or free-speech moment. Higher socialStat = more frequent speaker.
+ *
+ * FORMULA:
+ *   base = 12,000 / max(1, socialStat)   → socialStat 10 ≈ 1,200ms, socialStat 1 ≈ 12,000ms
+ *   result = max(500, base * (0.45..1.55)) → at least 500ms; wide variance
+ *
+ * NOTE: speakDelayMs is currently only referenced by some debate path helpers.
+ *   Full conversation turn-pacing is handled separately inside agentQueue.js
+ *   (_drainNextConvTurn uses a hardcoded 2200–4000ms range).
+ *
+ * @param {number} socialStat - Gator's sociability score (1–10).
+ * @returns {number} Milliseconds until this gator may speak again.
+ */
 export function speakDelayMs(socialStat) {
     const base = Math.round(12000 / Math.max(1, socialStat));
     return Math.max(500, Math.round(base * (0.45 + Math.random() * 1.1)));
 }
 
 // ── Bounds & distance ─────────────────────────────────────────
+
+/**
+ * Returns the usable pixel dimensions of the simulation stage (#world element).
+ * Subtracts GATOR_SIZE from both dimensions so gators cannot walk off the edge —
+ * their top-left corner is always fully inside the stage.
+ *
+ * Called every time a gator needs a new random target position or the resize
+ * handler fires. Always reads live clientWidth/clientHeight so it stays accurate
+ * after the browser window is resized.
+ *
+ * @returns {{ W: number, H: number }} Usable width and height in pixels.
+ */
 export function stageBounds() {
     const el = document.getElementById('world');
     return { W: el.clientWidth - GATOR_SIZE, H: el.clientHeight - GATOR_SIZE };
 }
 
+/**
+ * Returns the pixel distance between the CENTRES of two gator elements.
+ * Uses GATOR_SIZE/2 as the centre offset so the distance is measured from
+ * the middle of each sprite, not the top-left corner.
+ *
+ * Used in the tick loop to check:
+ *   - dist(a, b) <= TALK_DIST  → close enough to start talking
+ *   - dist(a, b) <= TALK_STOP  → close enough to stop walking toward each other
+ *   - dist(obs, speaker) <= TALK_DIST  → observer can overhear the speech
+ *
+ * @param {{x:number, y:number}} a - Gator A (any object with x and y).
+ * @param {{x:number, y:number}} b - Gator B.
+ * @returns {number} Distance in pixels.
+ */
 export function dist(a, b) {
     const cx = GATOR_SIZE / 2;
     const dx = (a.x+cx)-(b.x+cx), dy = (a.y+cx)-(b.y+cx);
     return Math.sqrt(dx*dx + dy*dy);
 }
 
+/**
+ * Raw point-to-point distance (no GATOR_SIZE offset).
+ * Used for layout geometry (e.g., checking distances between house positions
+ * during culde-sac generation) where there is no sprite to centre.
+ *
+ * @param {number} x1
+ * @param {number} y1
+ * @param {number} x2
+ * @param {number} y2
+ * @returns {number} Euclidean distance.
+ */
 export function distPt(x1,y1,x2,y2) {
     return Math.sqrt((x1-x2)**2 + (y1-y2)**2);
 }
 
 // ── Weighted pick ─────────────────────────────────────────────
+/**
+ * Picks a random key from a weighted probability object.
+ *
+ * HOW IT WORKS (the "roulette wheel" algorithm):
+ *   1. Sum all weights to get a total.
+ *   2. Pick a random float R in [0, total).
+ *   3. Walk through the entries, subtracting each weight from R.
+ *   4. The first entry where R drops to ≤ 0 is the winner.
+ *
+ * EXAMPLE:
+ *   weightedPick({ moving: 40, talking: 45, hosting: 15 })
+ *   → "moving" ~40% of the time, "talking" ~45%, "hosting" ~15%
+ *
+ * This is used in the tick loop as:
+ *   let next = weightedPick(socialWeights(gator));
+ * to decide what a gator does after their current activity ends.
+ *
+ * FALLBACK: If floating-point rounding ever leaves R > 0 after all entries,
+ * the first key is returned (prevents crash).
+ *
+ * @param {Object.<string, number>} weights - Key → weight number (any positive values; needn't sum to 100).
+ * @returns {string} The chosen key.
+ */
 export function weightedPick(weights) {
     const e = Object.entries(weights);
+    // Scale R across the total weight (weights don't need to sum to 100).
     let r = Math.random() * e.reduce((s,[,w]) => s+w, 0);
     for (const [k,w] of e) { r -= w; if (r <= 0) return k; }
-    return e[0][0];
+    return e[0][0]; // Fallback: first key (floating-point safety net).
 }
 
 // ── Appearance ────────────────────────────────────────────────
-// index-based so every gator gets a unique color + accessory
+/**
+ * Generates the static appearance data for one alligator sprite.
+ * Uses the slot index (0-based) so each gator always gets a DISTINCT
+ * combination of skin tone, hat style, and shirt color — no two gators
+ * look exactly alike.
+ *
+ * The returned object is stored on Person.appearance and read by
+ * buildFigureSVG() to draw the SVG sprite.
+ *
+ * @param {number} index - Gator slot index (0 … GATOR_COUNT-1).
+ * @returns {{ skinTone, hatStyle, hatColor, shirtColor, headSize, bodyHeight, legLength, armAngle }}
+ */
 export function randomAppearance(index) {
+    // Wrap index so it's safe even if GATOR_COUNT > SKIN_TONES.length.
     const i = (index ?? rnd(SKIN_TONES.length)) % SKIN_TONES.length;
     return {
-        skinTone:   SKIN_TONES[i],
-        hatStyle:   HAT_STYLES[i],
-        hatColor:   hsl(),
-        shirtColor: SHIRT_COLORS[i % SHIRT_COLORS.length],
-        headSize:   14 + rnd(5),
-        bodyHeight: 22 + rnd(8),
-        legLength:  18 + rnd(8),
-        armAngle:   20 + rnd(40),
+        skinTone:   SKIN_TONES[i],          // Base body/head color (green hue variants).
+        hatStyle:   HAT_STYLES[i],          // Accessory type: tophat, crown, sunglasses, etc.
+        hatColor:   hsl(),                  // Random bright accent color for the accessory.
+        shirtColor: SHIRT_COLORS[i % SHIRT_COLORS.length], // Belly color (subtle tint).
+        headSize:   14 + rnd(5),            // Head radius variation (14–18px).
+        bodyHeight: 22 + rnd(8),            // Body ellipse height variation (22–29px).
+        legLength:  18 + rnd(8),            // Leg line length (18–25px).
+        armAngle:   20 + rnd(40),           // Arm tilt from horizontal (20–59°).
     };
 }
 
-export function buildFigureSVG(p) {
+/**
+ * Generates the inline SVG string that renders one alligator as a small
+ * cartoon sprite on the simulation canvas. Called by spawnGators() in
+ * simulation.js when building the DOM element for each gator.
+ *
+ * The SVG is 60×58 pixels and includes:
+ *   - Ripple rings (water effect behind the body)
+ *   - Body ellipse + belly tint
+ *   - Tail (cubic Bézier path)
+ *   - Head ellipse + snout + nostrils
+ *   - Eyes (yellow iris + dark pupil)
+ *   - Legs (four short lines)
+ *   - Teeth (two short vertical lines on the snout)
+ *   - One unique accessory chosen by `appearance.hatStyle`
+ *
+ * Accessory types mapped to HAT_STYLES:
+ *   tophat, sunglasses, wig, bowtie, crown, bandana, hornplate, spines, monocle, crest
+ *
+ * WHY inline SVG (not a PNG)?
+ *   The gator color (bodyColor, hatColor) needs to be unique per gator.
+ *   Inline SVG lets us set these colors dynamically from JavaScript without
+ *   needing separate image files for every color combination.
+ *
+ * @param {object} p - Person object (reads p.appearance).
+ * @returns {string} HTML string of an `<svg>` element.
+ */
     const a  = p.appearance;
     const cx = 30;
     const svgH = 58;
@@ -372,6 +664,21 @@ export function buildFigureSVG(p) {
 }
 
 // ── Relationship helpers ──────────────────────────────────────
+/**
+ * Returns a human-readable tier label for a relationship score.
+ * Used in rendering.js tooltips and the info panel to categorise
+ * a numeric relation value into a word people understand.
+ *
+ * TIERS (match the colour-coding in the CSS):
+ *   ≥  60  → 'love'    (strong bond, will defend each other)
+ *   ≥  20  → 'like'    (friendly, cooperative)
+ *   > -20  → 'neutral' (indifferent; could go either way)
+ *   > -60  → 'dislike' (tense; may spread negative opinions)
+ *   ≤ -60  → 'hate'    (will actively accuse; murderer prefers this range for victims)
+ *
+ * @param {number} val - Relation score from -100 to +100.
+ * @returns {string} Tier label.
+ */
 export function relationTier(val) {
     if (val >= 60)  return 'love';
     if (val >= 20)  return 'like';
@@ -380,13 +687,36 @@ export function relationTier(val) {
     return 'hate';
 }
 
-
+/**
+ * Returns a CSS rgba color string for a relationship score.
+ * Used to tint talk-lines, relation bars, and panel backgrounds.
+ *
+ *   ≥  30 → green  (positive)
+ *   ≥ -30 → amber  (neutral)
+ *   <  -30 → red   (negative)
+ *
+ * @param {number} avgVal - Average relation value between two gators.
+ * @returns {string} CSS color string.
+ */
 export function relationColor(avgVal) {
     if (avgVal >= 30)  return 'rgba(76,175,80,.75)';
     if (avgVal >= -30) return 'rgba(255,193,7,.75)';
     return 'rgba(233,69,96,.75)';
 }
 
+/**
+ * Returns a single emoji character representing a relation score at a glance.
+ * Used in the gator tooltip to give players quick emotional context.
+ *
+ *   ≥  60 → ❤️  (loves)
+ *   ≥  20 → 😊  (likes)
+ *   > -20 → 😐  (neutral)
+ *   > -60 → 😒  (dislikes)
+ *   ≤ -60 → 😡  (hates)
+ *
+ * @param {number} val - Relation score from -100 to +100.
+ * @returns {string} Emoji character.
+ */
 export function relationEmoji(val) {
     if (val >= 60)  return '\u2764\uFE0F';
     if (val >= 20)  return '\u{1F60A}';
@@ -395,49 +725,101 @@ export function relationEmoji(val) {
     return '\u{1F621}';
 }
 
+/**
+ * Returns a CSS hex color for a social need value.
+ * Higher social need (gator wants interaction) = green.
+ * Low social need (gator is saturated / introvert) = red.
+ *
+ * NOTE: Social need is currently tracked via the SocialStart/SocialDecay
+ * constants but is not yet wired into the rendering pipeline.
+ * This helper exists for future use or the stats panel.
+ *
+ * @param {number} need - Social need value 0–100.
+ * @returns {string} CSS hex color.
+ */
 export function socialColor(need) {
     if (need >= 60) return '#4caf50';
     if (need >= 40) return '#ffc107';
     return '#e94560';
 }
 
-// ── Swamp layout ────────────────────────────────────────
+// ── Swamp layout ──────────────────────────────────────────────
+/**
+ * Calculates the positions of all gator home lilypads on the simulation stage.
+ *
+ * ALGORITHM — random scatter with collision avoidance:
+ *   Each lilypad is placed at a random (x, y) subject to three constraints:
+ *     1. MARGIN:   Must be at least (padR + 40) pixels from the stage edge.
+ *     2. CENTRE:   Must be more than 110px from the centre (keeps the fish-market
+ *                  area in the middle clear for debate and executions).
+ *     3. MIN DIST: Must be at least (padR * 2.8) pixels from every OTHER pad
+ *                  so they don't overlap.
+ *
+ *   Up to 4,000 random attempts are made. If a position satisfies all three
+ *   constraints it is accepted; otherwise it is discarded and a new one is tried.
+ *
+ *   After the attempt loop, a grid-based FALLBACK fills any remaining slots
+ *   in case the stage is too small for the random placer to find all N positions.
+ *
+ * DOOR POSITION:
+ *   Each lilypad's "doorX/doorY" is the point on the pad's edge CLOSEST to
+ *   the swamp centre. Gators walk to the door to enter/exit their home.
+ *   Calculated as:  doorX = padCentreX + cos(angleToCenter) * (padR - 6)
+ *                   doorY = padCentreY + sin(angleToCenter) * (padR - 6)
+ *
+ * RETURN VALUE:
+ *   { cx, cy, radius:0, housePositions: [{x, y, doorX, doorY, angle}, ...] }
+ *   cx/cy are the stage centre (used by buildCuldesacSVG to draw the centre feature).
+ *   `radius` is kept as 0 for backward compatibility (was used in an old ring layout).
+ *
+ * This function is called at startup by spawnGators() and again whenever the
+ * browser window is resized (so pads reposition correctly on mobile rotations, etc.).
+ */
 export function culdesacLayout() {
     const el = document.getElementById('world');
     const W  = el.clientWidth, H = el.clientHeight;
     const cx = W * 0.5, cy = H * 0.5;
 
-    // Scatter lilypads across the whole screen, avoiding the centre (fish market) and edges
-    const padR     = 62;           // half the pad collision zone (matches SVG padR)
-    const margin   = padR + 40;    // keep pads away from edges
-    const minDist  = padR * 2.8;   // minimum distance between pad centres
-    const centreR  = 110;          // clear zone around the central fish market
+    // These constants must stay in sync with the padR used in buildCuldesacSVG().
+    const padR     = 62;           // Half the lilypad collision zone (matches SVG padR).
+    const margin   = padR + 40;    // Keep pads away from the stage border.
+    const minDist  = padR * 2.8;   // Minimum centre-to-centre gap between pads.
+    const centreR  = 110;          // Dead-zone radius around the stage centre (fish market).
 
     const housePositions = [];
     let attempts = 0;
+
+    // ── Random-scatter placement loop ─────────────────────────
+    // Try up to 4,000 random positions; accept the first one that
+    // passes all three constraints (margin, centre-clear, min-distance).
     while (housePositions.length < GATOR_COUNT && attempts < 4000) {
         attempts++;
         const x = margin + Math.random() * (W - margin * 2);
         const y = margin + Math.random() * (H - margin * 2);
         const dx = x - cx, dy = y - cy;
+        // Constraint 2: Must not be inside the centre dead zone.
         if (Math.sqrt(dx*dx + dy*dy) < centreR) continue;
+        // Constraint 3: Must be far enough from every already-placed pad.
         let ok = true;
         for (const h of housePositions) {
             const ddx = x - h.x, ddy = y - h.y;
             if (Math.sqrt(ddx*ddx + ddy*ddy) < minDist) { ok = false; break; }
         }
         if (ok) {
-            // doorX/doorY = the edge of the pad closest to the swamp centre
+            // Calculate the "door" as the point on the pad rim facing inward.
             const ang = Math.atan2(cy - y, cx - x);
             housePositions.push({
                 x, y,
                 doorX: x + Math.cos(ang) * (padR - 6),
                 doorY: y + Math.sin(ang) * (padR - 6),
-                angle: ang
+                angle: ang  // Stored so buildCuldesacSVG can tilt decorations outward.
             });
         }
     }
-        // Fallback: fill any remaining slots in a grid-ish scatter
+
+    // ── Fallback: grid-fill remaining slots ───────────────────
+    // This runs only if the stage is very small and the random placer
+    // exhausted its attempts without filling all GATOR_COUNT slots.
     while (housePositions.length < GATOR_COUNT) {
         const idx = housePositions.length;
         const gx = margin + (idx % 4) * ((W - margin*2) / 3);
@@ -449,7 +831,29 @@ export function culdesacLayout() {
     return { cx, cy, radius: 0, housePositions };
 }
 
-export function buildCuldesacSVG(layout) {
+/**
+ * Generates the full static background SVG for the simulation stage.
+ *
+ * This SVG is inserted into the DOM as `<svg id="culdesac">` at the very
+ * bottom of the z-stack (z-index:0). It is purely decorative — no
+ * pointer events, no game logic. Everything in it is drawn in layer order:
+ *
+ *   Layer 1 — Depth gradient rect (makes the swamp feel deep)
+ *   Layer 2 — Murk patches (dark ellipses for deep-water areas)
+ *   Layer 3 — Reed clusters (cattails along the edges)
+ *   Layer 4 — Floating logs (detailed with grain lines, shadow, water ring)
+ *   Layer 5 — Mini lilypads (scattered decorative pads, not interactive)
+ *   Layer 6 — Interactive home lilypads (one per gator; with flower and glow halo)
+ *
+ * SEEDED PSEUDO-RANDOM (`sr()`):
+ *   Non-home decorations (logs, reeds, mini pads) use a seeded LCG so that
+ *   their positions remain STABLE across resize events. Without seeding,
+ *   every window resize would regenerate random positions and the scene
+ *   would "flash" into a new layout. With seeding it re-draws identically.
+ *
+ * @param {{ cx:number, cy:number, housePositions: object[] }} layout - From culdesacLayout().
+ * @returns {string} HTML string of the full `<svg id="culdesac">` element.
+ */
     const el = document.getElementById('world');
     const W  = el.clientWidth, H = el.clientHeight;
     const { cx, cy } = layout;

@@ -1,8 +1,42 @@
-﻿import {
+﻿/**
+ * @fileoverview phases.js — Game phase transition logic and timing.
+ *
+ * Each exported function triggers one phase of the murder-mystery cycle:
+ *
+ *   triggerNightfall()   Day → Night
+ *     Selects the murder victim (mirrors C# MurderService.SelectVictim),
+ *     sends all gators home, activates the night overlay.
+ *
+ *   triggerDawn()        Night → Dawn
+ *     Reveals the body, injects murder memories into all agents,
+ *     updates suspicion scores, plays mourning reactions.
+ *
+ *   triggerDebate()      Dawn → Debate
+ *     Each gator takes turns making accusations or defences via the AI.
+ *     Suspicion scores influence who accuses whom (mirrors MurderService logic).
+ *
+ *   triggerVote()        Debate → Vote
+ *     Establishes clockwise vote order and kicks off the sequential voting ceremony.
+ *
+ *   showNextVoter()      Internal — advances the vote cursor one step.
+ *
+ *   triggerExecute()     Vote → Execute
+ *     Tallies votes, announces the condemned gator, plays the execution walk.
+ *
+ *   finaliseExecution()  Called after the execute animation completes.
+ *     Eliminates the condemned gator, checks game-over conditions, cycles to Day.
+ *
+ *   pickDebateSuspect()  Utility — returns the best accusation target for a gator.
+ *     Murderers prefer innocents already suspected by others (safe deflection).
+ *     Towngators prefer whoever they personally suspect most.
+ *
+ * @module phases
+ */
+import {
     GATOR_SIZE, PHASE, DAY_TICKS, NIGHT_TICKS, DAWN_TICKS, DEBATE_TICKS,
     VOTE_DISPLAY_TICKS,
     MEMORY_STRENGTH, MAX_DEBATE_SPEAKERS,
-    DEBATE_SPEAK_COOLDOWN
+    DEBATE_SPEAK_COOLDOWN, PERSONALITY_EMOJI
 } from './gameConfig.js';
 import { rnd, rndF, speakDelayMs } from './helpers.js';
 import { living } from './gator.js';
@@ -17,6 +51,26 @@ function setNightOverlay(night) {
     document.getElementById('world').classList.toggle('night', night);
 }
 
+/**
+ * Selects the murderer's next victim using a weighted scoring algorithm.
+ *
+ * VICTIM SELECTION FORMULA:
+ * ─────────────────────────────────────────────────────────────────
+ *   score(candidate) =
+ *     candidate.suspicion[murdererId] × 0.6    ← Most dangerous: targets the most suspicious
+ *     - killer.relations[candidate.id] × 0.3   ← Prefers to eliminate disliked gators
+ *     + random(0, 20)                           ← Small random factor for unpredictability
+ *
+ *   Victim = candidate with HIGHEST score
+ *
+ * STRATEGIC IMPLICATION:
+ *   Gators who voice suspicion during debates are painting targets on themselves.
+ *   The murderer watches who is most onto them and eliminates that threat first.
+ *   The random factor means even low-suspicion gators have a small chance,
+ *   preventing the killer from being entirely predictable.
+ *
+ * @returns {object|null} The victim Person object, or null if no candidates remain.
+ */
 function murderVictim() {
     const killer = state.gators.find(p => p.id === state.murdererId);
     if (!killer) return null;
@@ -32,6 +86,28 @@ function murderVictim() {
     });
 }
 
+/**
+ * Returns the best accusation target for a gator during the debate phase.
+ *
+ * TWO STRATEGIES based on the gator's role:
+ *
+ * MURDERER PATH:
+ *   The murderer never accuses themselves. Instead they deflect:
+ *   1. Find all innocent gators (not themselves).
+ *   2. Prefer innocents who are ALREADY suspected by others — this is safer because
+ *      accusing someone others already suspect looks legitimate and reinforces distrust.
+ *   Score: (sum of suspicion from all others) × 0.5
+ *          - killer's own relation to the target × 0.4
+ *          + random(20)
+ *
+ * TOWNGATOR PATH:
+ *   Simply vote for whoever they personally suspect most:
+ *   Score: suspicion[target] × 0.7 - relation[target] × 0.3
+ *   (Gators they distrust AND suspect are higher priority)
+ *
+ * @param {object} p - The debating Person object.
+ * @returns {object|null} The target Person object, or null if no candidates.
+ */
 export function pickDebateSuspect(p) {
     const alive = living().filter(q => q.id !== p.id);
     if (alive.length === 0) return null;
@@ -56,7 +132,29 @@ export function pickDebateSuspect(p) {
     });
 }
 
-// ── Phase transitions ─────────────────────────────────────────
+// ── Phase transitions ──────────────────────────────────────────
+
+/**
+ * DAY → NIGHT phase transition.
+ *
+ * SEQUENCE:
+ *   1. Set gamePhase = NIGHT, cycleTimer = NIGHT_TICKS.
+ *   2. Select the murder victim using murderVictim() and store in state.nightVictimId.
+ *   3. Record a murder memory for the killer's AI agent.
+ *   4. Abort all active conversations: clear talkingTo, message, guestOfIndex.
+ *   5. Send every living gator indoors (indoors=true, activity='resting').
+ *   6. Clear all talk-line SVG elements from the stage.
+ *   7. Activate the night overlay CSS (dark tint).
+ *   8. Pause the simulation and call requestNightReport().
+ *      → The night report panel shows each gator's inner thoughts.
+ *      → The Promise resolves when the player clicks "Continue to Morning".
+ *   9. On Continue: un-pause, call triggerDawn().
+ *
+ * WHY pause during the night report?
+ *   The simulation tick must be paused so no game logic runs while the player
+ *   is reading the night reflections. The simulation resumes the moment the
+ *   player dismisses the panel.
+ */
 export function triggerNightfall() {
     state.gamePhase      = PHASE.NIGHT;
     state.isNight        = true;
@@ -97,6 +195,26 @@ export function triggerNightfall() {
     });
 }
 
+/**
+ * NIGHT → DAWN phase transition.
+ *
+ * SEQUENCE:
+ *   1. Set gamePhase = DAWN, cycleTimer = DAWN_TICKS.
+ *   2. Remove night overlay (day returns).
+ *   3. Increment dayNumber (now a new day).
+ *   4. Add nightVictimId to state.deadIds; record deathOrder, deathDay, deathType.
+ *   5. Call showDeadBody() to place the 💀 death marker at the victim's position.
+ *   6. Move all living gators back outside their house doors.
+ *   7. Assign reaction messages:
+ *        Murderer: "How terrible… {name} is gone."
+ *        Everyone else: "Oh no… {name} was found dead!"
+ *   8. recordMemory() for all living gators with a 'dawn' event.
+ *
+ * SUSPICION NOTE:
+ *   Dawn does NOT directly update suspicion scores here — that happens implicitly
+ *   through the AI memory injection (gators remember who died and will reference it
+ *   in their next conversation) and through the debate-phase suspicion seeding.
+ */
 export function triggerDawn() {
     state.gamePhase = PHASE.DAWN;
     state.isNight   = false;
@@ -105,6 +223,12 @@ export function triggerDawn() {
     state.dayNumber++;
     if (state.nightVictimId !== null) {
         state.deadIds.add(state.nightVictimId);
+        const victim = state.gators.find(p => p.id === state.nightVictimId);
+        if (victim) {
+            victim.deathOrder = state.deadIds.size;
+            victim.deathDay = state.dayNumber;
+            victim.deathType = 'murdered';
+        }
         showDeadBody(state.nightVictimId);
     }
 
@@ -129,10 +253,41 @@ export function triggerDawn() {
     updatePhaseLabel();
 }
 
-// ── Staggered debate ──────────────────────────────────────────
-// Instead of everyone speaking at once, we seed suspicion for all up front
-// but only give 1–2 gators their first message. Others get a speakCooldown
-// and will speak on subsequent ticks when their cooldown expires.
+// ── Staggered debate ────────────────────────────────────────────
+
+/**
+ * DAWN → DEBATE phase transition.
+ *
+ * OVERVIEW:
+ *   All living gators gather at their house doors and take turns accusing or
+ *   defending. The tick loop handles ongoing speech (via simulation.js) once
+ *   this function seeds the initial state.
+ *
+ * SEQUENCE:
+ *   1. Set gamePhase = DEBATE, cycleTimer = DEBATE_TICKS.
+ *   2. For every living gator:
+ *      a. Set activity = 'debating', position toward house door exterior.
+ *      b. Seed suspicion from relationships if not already set:
+ *         suspicion[other] = max(0, -(relation[other] × 0.5) + random(20))
+ *         (Gators who dislike someone already suspect them)
+ *      c. Compute conviction = max suspicion score (+ 80 bonus for murderer).
+ *      d. Call pickDebateSuspect() to find their accusation target.
+ *      e. recordMemory() with 'debate_start' event.
+ *   3. Stagger first speech:
+ *      - First MAX_DEBATE_SPEAKERS gators from a shuffled order get an
+ *        immediate accusation message.
+ *      - Rest get a delayed nextSpeakAt (2s + (index × 1.5s) + random noise).
+ *        This staggers the chorus so messages don't all appear simultaneously.
+ *
+ * PERSUASION (runs on subsequent ticks in simulation.js):
+ *   When a gator speaks with conviction > CONVICTION_THRESHOLD, they can
+ *   nudge the suspicion scores of trusted nearby gators toward their target.
+ *   This allows charismatic / convinced gators to sway the vote.
+ *
+ * NOTE: This is the only phase where gators speak continuously without AI.
+ *   Debate lines are scripted templates ("I suspect {name}!") rather than
+ *   LLM-generated, because the AI is too slow for rapid-fire accusation exchange.
+ */
 export function triggerDebate() {
     state.gamePhase  = PHASE.DEBATE;
     state.cycleTimer = DEBATE_TICKS;
@@ -191,7 +346,29 @@ export function triggerDebate() {
     updatePhaseLabel();
 }
 
-// ── Vote ──────────────────────────────────────────────────────
+// ── Vote ────────────────────────────────────────────────────────
+
+/**
+ * Determines who a gator will vote to execute (pure JavaScript logic, no AI call).
+ *
+ * TWO STRATEGIES:
+ *
+ * MURDERER STRATEGY:
+ *   1. Check the current vote tally (state.voteResults).
+ *   2. If the leading target is NOT the murderer, vote for them too
+ *      (safer to pile on an innocent who is already losing).
+ *   3. Otherwise: vote for the innocent they dislike most.
+ *
+ * TOWNGATOR STRATEGY:
+ *   Score each candidate:
+ *     score = suspicion[target] - (relation[target] × 0.3) + random(25)
+ *   Vote for the highest-score candidate.
+ *   The random factor (0–25) introduces slight unpredictability so gators
+ *   with near-equal scores don't always produce the same outcome.
+ *
+ * @param {object} voter      - The Person object casting the vote.
+ * @returns {object|null} The Person object they vote to execute, or null (abstain).
+ */
 export function decideVote(voter) {
     const alive = living().filter(q => q.id !== voter.id);
     if (alive.length === 0) return null;
@@ -216,6 +393,24 @@ export function decideVote(voter) {
     });
 }
 
+/**
+ * DEBATE → VOTE phase transition.
+ *
+ * Sets up the sequential vote ceremony:
+ *   1. Set gamePhase = VOTE.
+ *   2. Shuffle living gators into a random vote order (state.voteOrder[]).
+ *   3. Reset state.voteResults = {} (fresh tally).
+ *   4. Set state.voteDisplayTimer = VOTE_DISPLAY_TICKS so the tick loop
+ *      knows how long to display each voter before advancing.
+ *   5. Set cycleTimer to cover all voters + a buffer.
+ *   6. Clear all speech bubbles.
+ *   7. Call showNextVoter() to display the first voter immediately.
+ *
+ * SEQUENTIAL DISPLAY:
+ *   The tick loop decrements state.voteDisplayTimer each tick.
+ *   When it hits 0, tick() increments state.voteIndex and calls showNextVoter().
+ *   This creates the "one vote at a time" dramatic reveal effect.
+ */
 export function triggerVote() {
     state.gamePhase        = PHASE.VOTE;
     state.voteOrder        = living().slice().sort(() => Math.random() - 0.5);
@@ -227,6 +422,25 @@ export function triggerVote() {
     showNextVoter();
 }
 
+/**
+ * Advances the vote ceremony by one voter.
+ *
+ * Called by:
+ *   - triggerVote() immediately (first voter)
+ *   - simulation.js tick() when voteDisplayTimer hits 0 (subsequent voters)
+ *
+ * SEQUENCE PER VOTER:
+ *   1. Remove 'voting-active' highlight from the previous voter's sprite.
+ *   2. If all voters have voted: triggerExecute().
+ *   3. Get the current voter (state.voteOrder[state.voteIndex]).
+ *   4. Call decideVote(voter) for the JS-logic vote decision.
+ *   5. Increment state.voteResults[target.id].
+ *   6. Push to state.voteHistory for post-game resentment tracking.
+ *   7. Set voter.message = "I vote {name}!" (speech bubble).
+ *   8. Add 'voting-active' CSS class to this voter's sprite (highlight).
+ *   9. updateVoteTally() to refresh the vote bar chart.
+ *  10. Reset state.voteDisplayTimer = VOTE_DISPLAY_TICKS.
+ */
 export function showNextVoter() {
     document.querySelectorAll('.voting-active').forEach(e => e.classList.remove('voting-active'));
     if (state.voteIndex >= state.voteOrder.length) { triggerExecute(); return; }
@@ -257,6 +471,16 @@ export function showNextVoter() {
     state.voteDisplayTimer = VOTE_DISPLAY_TICKS;
 }
 
+/**
+ * Re-renders the live vote bar-chart panel (#vote-tally).
+ * Called after every vote is cast so the player sees totals update in real time.
+ *
+ * Renders one row per living gator:
+ *   {name} ════════░░░░  3
+ *   {name} ═══░░░░░░░░  1
+ *
+ * The leading candidate's bar gets the 'leading' CSS class (coloured red).
+ */
 export function updateVoteTally() {
     const panel = document.getElementById('vote-tally');
     if (!panel) return;
@@ -284,7 +508,32 @@ export function updateVoteTally() {
     panel.style.display = 'block';
 }
 
-// ── Execute ───────────────────────────────────────────────────
+// ── Execute ─────────────────────────────────────────────────────
+
+/**
+ * VOTE → EXECUTE phase transition.
+ *
+ * SEQUENCE:
+ *   1. Tally state.voteResults: find the gator with the most votes.
+ *      Ties → state.voteTarget = null (no execution).
+ *   2. Apply vote-resentment side-effects:
+ *      For each vote cast, every OTHER gator with a chance of remembering
+ *      (MEMORY_STRENGTH[personality]) records who voted for whom.
+ *      If a gator liked the vote TARGET, they resent the VOTER:
+ *        voter.relations[voterId] -= 8
+ *      This ensures votes have lasting social consequences beyond the execution.
+ *   3. Remove voting-active highlights.
+ *   4. If no condemned target (tie): call finaliseExecution() directly.
+ *   5. Otherwise:
+ *      - Set condemnedId, executeTimer = 3, gamePhase = EXECUTE.
+ *      - Give the condemned gator activity='moving' toward centre-stage.
+ *      - Give the condemned a scripted plea: "Please, not me! I'm innocent!"
+ *      - Give bystanders a farewell message.
+ *      - recordMemory() for all gators: 'execution' event.
+ *
+ * The actual elimination happens in finaliseExecution() once the condemned
+ * walks close enough to the centre (checked in simulation.js tick()).
+ */
 export function triggerExecute() {
     let topId = null, topCount = 0;
     for (const [id, cnt] of Object.entries(state.voteResults)) {
@@ -351,6 +600,30 @@ export function triggerExecute() {
     updateStats();
 }
 
+/**
+ * Finalises an execution after the condemned gator reaches centre-stage.
+ * Called from simulation.js tick() when the condemned is within 20px of centre.
+ *
+ * SEQUENCE:
+ *   1. Hide the vote tally panel.
+ *   2. Remove 'condemned' CSS highlight.
+ *   3. If a target was set:
+ *      a. Add target to state.deadIds.
+ *      b. Record deathOrder, deathDay, deathType = 'executed'.
+ *      c. Push history entries to all living gators (witnessed_execution, disagreed_vote).
+ *      d. Place a coffin emoji marker on the stage at the condemned gator's position.
+ *      e. Add 'dead' CSS class to the gator sprite.
+ *   4. WIN CHECK:
+ *      - If murdererId is in deadIds: triggerGameOver(true)  → TOWN WINS
+ *      - If living().length <= 1:     triggerGameOver(false) → MURDERER WINS
+ *      - Otherwise: start a new Day
+ *        (reset cycleTimer, completedConvCount, conversationFlags, move gators outside)
+ *
+ * SUSPICION DECAY ON NEW DAY:
+ *   All surviving gators' suspicion scores are reduced by 10 points.
+ *   This prevents the game from becoming trivially locked (everyone always
+ *   votes the same person every round). Some recalibration is needed each day.
+ */
 export function finaliseExecution() {
     const panel = document.getElementById('vote-tally');
     if (panel) panel.style.display = 'none';
@@ -361,6 +634,10 @@ export function finaliseExecution() {
         state.deadIds.add(state.voteTarget);
         const condemned = state.gators.find(p => p.id === state.voteTarget);
         if (condemned) {
+            condemned.deathOrder = state.deadIds.size;
+            condemned.deathDay = state.dayNumber;
+            condemned.deathType = 'executed';
+
             // Record execution in everyone's history
             for (const p of living()) {
                 p.history.push({ day: state.dayNumber, type: 'witnessed_execution', target: state.voteTarget, detail: `${condemned.name} was executed by vote` });
@@ -417,6 +694,28 @@ export function finaliseExecution() {
     updatePhaseLabel();
 }
 
+/**
+ * Ends the game and displays the game-over overlay.
+ *
+ * @param {boolean} townWins - true = murderer executed (town wins); false = murderer survived.
+ *
+ * SEQUENCE:
+ *   1. Set gamePhase = OVER.
+ *   2. Clear setInterval (tick loop) and cancelAnimationFrame (rAF loop).
+ *   3. Look up the killer's Person object for the reveal text.
+ *   4. Populate #game-over-overlay with:
+ *      - Result title: "🐊 Swamp Wins!" or "🔪 Killer Wins!"
+ *      - Body text explaining the outcome.
+ *      - Character roster: ALL gators sorted by survival order, showing:
+ *        personality emoji, name, role badges (Killer / Liar), conversation count,
+ *        death info (Murdered / Executed, Day N).
+ *   5. Show the overlay (display=flex).
+ *
+ * CHARACTER SORT ORDER:
+ *   1. Living gators first
+ *   2. Dead gators in death order (first to die last in list)
+ *   Within dead: sorted by deathOrder ascending.
+ */
 export function triggerGameOver(townWins) {
     state.gamePhase = PHASE.OVER;
     // stopAll will be called by simulation.js via the import
@@ -432,6 +731,55 @@ export function triggerGameOver(townWins) {
         overlay.querySelector('.go-body').innerHTML = townWins
             ? `The swamp correctly identified <strong>${killer ? killer.name : 'the killer'}</strong> as the murderer!<br>Justice has been served.`
             : `<strong>${killer ? killer.name : 'The killer'}</strong> outlasted every gator and got away with it.`;
+
+        // Build character list
+        const charactersEl = document.getElementById('go-characters');
+        if (charactersEl) {
+            // Sort: living first, then by death order
+            const sortedGators = [...state.gators].sort((a, b) => {
+                const aDead = state.deadIds.has(a.id);
+                const bDead = state.deadIds.has(b.id);
+                if (aDead !== bDead) return aDead ? 1 : -1; // living first
+                if (aDead && bDead) return (a.deathOrder || 0) - (b.deathOrder || 0); // death order
+                return a.id - b.id; // original order for living
+            });
+
+            charactersEl.innerHTML = sortedGators.map(p => {
+                const isDead = state.deadIds.has(p.id);
+                const isKiller = p.id === state.murdererId;
+                const personality = PERSONALITY_EMOJI[p.personality] || '🐊';
+
+                let badges = '';
+                if (isKiller) badges += '<span class="go-char-badge go-char-badge-killer">Killer</span>';
+                if (p.liar && !isKiller) badges += '<span class="go-char-badge go-char-badge-liar">Liar</span>';
+
+                let deathInfo = '';
+                if (isDead) {
+                    const deathType = p.deathType === 'murdered' ? '☠️ Murdered' : '⚔️ Executed';
+                    deathInfo = `<div class="go-char-death">${deathType} on Day ${p.deathDay || '?'}</div>`;
+                }
+
+                return `
+                    <div class="go-char ${isDead ? 'go-char-dead' : 'go-char-alive'}">
+                        <div class="go-char-icon">${personality}</div>
+                        <div class="go-char-info">
+                            <div class="go-char-name">
+                                ${p.name}
+                                ${badges}
+                                ${isDead ? '💀' : '✓'}
+                            </div>
+                            <div class="go-char-details">
+                                ${p.personality.charAt(0).toUpperCase() + p.personality.slice(1)} · 
+                                ${p.chatLog.length} conversations · 
+                                ${Object.keys(p.relations).length} relationships
+                            </div>
+                            ${deathInfo}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
         overlay.style.display = 'flex';
     }
     updatePhaseLabel();

@@ -1,4 +1,45 @@
-﻿import {
+﻿/**
+ * @fileoverview simulation.js — Core simulation tick loop and conversation engine.
+ *
+ * This is the largest and most central module in the frontend. It exports two
+ * public functions consumed by main.js:
+ *
+ *   initSimulation()
+ *     Called once at page load. Spawns houses and gators, assigns the murderer,
+ *     initialises all relationships, registers the setInterval tick loop, and
+ *     calls the .NET API to initialise SK agents.
+ *
+ *   testConversation()
+ *     Debug helper: picks two random living gators and a random topic, then
+ *     immediately launches a full AI conversation between them.
+ *
+ * Internal tick loop (runs every TICK_MS ms via setInterval):
+ *   Each tick:
+ *     1. Decrements the day/night cycle timer.
+ *     2. Moves each gator toward their target position.
+ *     3. Evaluates whether any two gators are close enough to start a conversation.
+ *     4. Manages the active conversation lock (only 1 AI conv at a time).
+ *     5. Plays back buffered AI conversation turns if one is queued.
+ *     6. Triggers phase transitions (night, dawn, debate, vote, execute) when timers expire.
+ *     7. Calls renderAllGators() for the current frame.
+ *
+ * Conversation flow (public conversations):
+ *   Two gators approach each other → simulation triggers requestFullConversation() →
+ *   agentQueue buffers memories, calls POST /api/agent/conversation → AI returns
+ *   all turns → agentQueue plays them back one at a time → onComplete callback resets
+ *   both gators to 'moving'.
+ *
+ * Private conversations (hosting/visiting):
+ *   Same flow but isPrivate=true — speech is not shown to passers-by and
+ *   the conversation enclosure DOM element wraps the house.
+ *
+ * Overhearing:
+ *   When a gator speaks publicly, logChat() broadcasts the message to all gators
+ *   within TALK_DIST. Overheard speech can update nearby gators' suspicion scores.
+ *
+ * @module simulation
+ */
+import {
     GATOR_SIZE, PHASE, TICK_MS, TALK_DIST, TALK_STOP,
     HOME_WARN_TICKS,
     VOTE_DISPLAY_TICKS,
@@ -76,6 +117,40 @@ export function testConversation() {
 }
 
 // ── Chat logging & overhearing ────────────────────────────────
+/**
+ * Logs a speech (or thought) event into the relevant gators' chat histories
+ * and broadcasts it to nearby observers who can overhear.
+ *
+ * CALLED BY:
+ *   - agentQueue._drainNextConvTurn() — for each AI conversation turn
+ *   - Various phase helpers that generate scripted one-liners
+ *
+ * WHAT IT DOES:
+ *   1. Builds a chat log entry { day, from, to, message, thought, ts, type }
+ *      and pushes it to the speaker's chatLog.
+ *   2. Pushes the same entry (without the thought) to the target's chatLog
+ *      so both sides of the conversation are recorded from each perspective.
+ *   3. If NOT private, iterates every LIVING gator. Any gator within TALK_DIST
+ *      of the speaker receives an 'overheard' entry in their chatLog AND a
+ *      recordMemory() call so the AI will remember they overheard this line.
+ *
+ * PRIVATE CONVERSATIONS (isPrivate = true):
+ *   Hosting/visiting conversations are private. No overhearing. The only gators
+ *   who receive the entry are the speaker and the direct target. This reflects
+ *   that conversations inside a home are not audible to passersby.
+ *
+ * NOTE — SUSPICION via overhearing:
+ *   When a gator overhears a line that mentions the murderer or accuses someone,
+ *   that could update their suspicion score. The suspicion update is currently
+ *   handled upstream (in _maybeShareOpinion and agentQueue context injection)
+ *   rather than inside logChat itself.
+ *
+ * @param {object}  speaker   - Person object for the gator speaking.
+ * @param {number|null} targetId - ID of the gator being spoken to, or null for broadcast.
+ * @param {string}  message   - The speech text to log.
+ * @param {string|null} thought - The speaker's inner thought (only stored on speaker's log).
+ * @param {boolean} isPrivate - If true, no overhearing (hosting conversations).
+ */
 export function logChat(speaker, targetId, message, thought, isPrivate = false) {
     if (!message) return; // nothing meaningful to log
     const now = Date.now();
@@ -109,6 +184,30 @@ export function logChat(speaker, targetId, message, thought, isPrivate = false) 
 }
 
 // ── Conversation completion counter ───────────────────────────
+/**
+ * Called every time a full AI conversation concludes (public or hosting).
+ *
+ * RESPONSIBILITIES:
+ *   1. Clears the global `state.activeConversation` flag so new conversations
+ *      can start on the next tick.
+ *   2. Increments `state.completedConvCount` — the day-end trigger watches this.
+ *   3. Once completedConvCount reaches CONV_LIMIT_FOR_NIGHTFALL (defined in
+ *      gameConfig.js, mirrored from GameConstants.cs), starts a 1-minute
+ *      countdown (`state.dayEndTimerExpiresAt`) after which nightfall is triggered
+ *      if all ongoing conversations have finished.
+ *
+ * WHY a conversation limit rather than a fixed time?
+ *   Without a limit, the day could end in the middle of a conversation, cutting
+ *   off the AI mid-sentence. The limit ensures at least N full conversations happen
+ *   before nightfall can begin. The 1-minute delay after hitting the limit gives
+ *   any in-progress conversations time to naturally finish.
+ *
+ * CALL SITES:
+ *   - simulation.js tick() — when two street-talking gators finish their conversation
+ *   - simulation.js hosting block — via onHostingComplete callback
+ *   - agentQueue._drainNextConvTurn() — via the onComplete callback
+ *   - simulation.js testConversation() — debug helper
+ */
 function _onConversationCompleted() {
     state.activeConversation = false;
     state.completedConvCount++;
@@ -121,6 +220,42 @@ function _onConversationCompleted() {
 }
 
 // ── Opinion sharing helper ────────────────────────────────────
+/**
+ * Called at the END of a street conversation (after driftRelations) to
+ * simulate one gator sharing their opinion of a THIRD gator with the listener.
+ *
+ * This is how rumours and reputation spread through the village — gators gossip
+ * about each other and gradually update their second-hand opinions.
+ *
+ * PROBABILITY:
+ *   30% chance per conversation (70% of the time nothing is shared).
+ *   This keeps gossip feeling sporadic and organic rather than constant.
+ *
+ * THREE PATHS depending on speaker's feelings toward the listener:
+ *
+ * PATH A — Speaker DISLIKES listener (relation < -30):
+ *   Sub-path A1 (50%): Guarded response. Speaker says little and is evasive.
+ *     Records a 'guarded' history entry. Sets a 2.5s speak cooldown.
+ *   Sub-path A2 (50%): Speaker actively LIES to frame an enemy.
+ *     Picks a disliked third gator as the "target" and a liked gator as the
+ *     "victim." Asks the AI to generate a framing line. Nudges the listener's
+ *     suspicion of the target upward, proportional to how much the listener
+ *     trusts the speaker.
+ *
+ * PATH B — Normal (honest) opinion sharing:
+ *   Picks the third gator the speaker has the STRONGEST opinion about
+ *   (positive or negative, by absolute value).
+ *   If the speaker is a liar AND has low trust with the listener, there is a
+ *   40% chance they FLIP the opinion (pretend to like someone they hate, or vice versa).
+ *   The listener's relation toward the target is nudged by:
+ *     influence = (trust / 100) * 18 + 4   (range: ~4..22)
+ *     nudge = ±influence depending on whether the opinion was positive or negative
+ *   Both speaker and listener get history entries. If nudge > 5, the listener
+ *   also gets an 'opinion_changed' history entry for the end-game report.
+ *
+ * @param {object} speaker  - Person object for the gator doing the gossip.
+ * @param {object} listener - Person object for the gator receiving the gossip.
+ */
 function _maybeShareOpinion(speaker, listener) {
     if (Math.random() > 0.30) return; // 30% chance per conversation
     const others = living().filter(q => q.id !== speaker.id && q.id !== listener.id);
@@ -200,6 +335,66 @@ function _maybeShareOpinion(speaker, listener) {
 }
 
 // ── Activity tick ─────────────────────────────────────────────
+/**
+ * The main simulation tick — called every TICK_MS milliseconds by setInterval.
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * TICK LOOP OVERVIEW (runs once per TICK_MS, e.g. every 250ms)
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * 1. EARLY RETURNS
+ *    - If game is OVER or paused, do nothing.
+ *
+ * 2. CYCLE TIMER
+ *    - Decrements state.cycleTimer each tick.
+ *    - When it hits 0, triggers the next phase transition:
+ *        DAY    → triggerNightfall()
+ *        NIGHT  → triggerDawn()
+ *        DAWN   → triggerDebate()
+ *        DEBATE → triggerVote()
+ *        VOTE   → triggerExecute()
+ *
+ * 3. CONVERSATION-LIMIT NIGHTFALL
+ *    - Once state.completedConvCount >= CONV_LIMIT_FOR_NIGHTFALL, a 1-minute
+ *      timer runs. When it expires, state.noNewConversations = true.
+ *    - When noNewConversations is true, any active hosting sessions are
+ *      force-aborted (ticksLeft set to 1) so they wind down quickly.
+ *    - When no gators are left talking, triggerNightfall() fires immediately
+ *      regardless of the cycleTimer.
+ *
+ * 4. HOME WARNING
+ *    - At HOME_WARN_TICKS ticks remaining in the day, all active conversations
+ *      are cut short and every gator starts walking home.
+ *
+ * 5. PHASE-SPECIFIC BRANCHES
+ *    - VOTE phase: advances the sequential vote cursor on a timer.
+ *    - EXECUTE phase: moves the condemned gator to centre, then finalises.
+ *    - NIGHT phase: returns early (no gator logic during night).
+ *
+ * 6. PER-GATOR LOOP
+ *    For each living gator:
+ *      a. Decrement ticksLeft.
+ *      b. Handle DEBATING (generate accusation/defence messages).
+ *      c. Skip gators still mid-activity (ticksLeft > 0).
+ *      d. End TALKING: if AI call or turn drain is still running, keep waiting.
+ *         Otherwise: drift relations, record memories, fire _maybeShareOpinion,
+ *         fire _onConversationCompleted.
+ *      e. End HOSTING: release guests, apply topic delta, fire onHostingComplete.
+ *      f. End VISITING: release gator, put back to 'moving'.
+ *      g. Choose next activity via weightedPick(socialWeights(gator)).
+ *         - 'talking': find a nearby eligible partner; start a conversation.
+ *         - 'hosting': find a free guest; send them to the host's home.
+ *         - 'moving':  pick a new random target position.
+ *
+ * 7. RENDER
+ *    - renderGator() is called on every living gator.
+ *    - Private chat enclosures are cleaned up.
+ *    - updateStats() refreshes the HUD.
+ *
+ * NOTE: Pixel movement (smooth animation) happens in gameLoop() via
+ * requestAnimationFrame — NOT here. The tick only updates logical activity
+ * state; gameLoop() reads that state to move sprites each animation frame.
+ */
 function tick() {
     if (state.gamePhase === PHASE.OVER) return;
     if (state.paused) return;
@@ -220,6 +415,15 @@ function tick() {
             state.noNewConversations = true;
         }
         if (state.noNewConversations) {
+            // Force-abort any in-progress hosting so they can wind down this tick
+            for (const p of living()) {
+                if (p.activity === 'hosting' || p.activity === 'visiting') {
+                    // Clear the AI drain and waiting flags so the hosting cleanup branch can fire
+                    p._convTurns = [];
+                    p.isWaiting  = false;
+                    if (p.ticksLeft > 1) p.ticksLeft = 1;
+                }
+            }
             const anyTalking = living().some(p => p.talkingTo !== null || p.activity === 'hosting' || p.activity === 'visiting');
             if (!anyTalking) {
                 triggerNightfall();
@@ -626,6 +830,41 @@ function tick() {
 }
 
 // ── Animation loop ────────────────────────────────────────────
+/**
+ * The requestAnimationFrame (rAF) loop — runs at ~60fps independent of tick().
+ *
+ * SEPARATION OF CONCERNS:
+ *   tick()      = LOGICAL state (activity, relations, conversation starts)  — every 250ms
+ *   gameLoop()  = VISUAL state  (pixel positions, DOM style updates)        — every ~16ms
+ *
+ * This separation is what makes the simulation feel smooth even though the
+ * logic only updates 4 times per second. Gators glide between positions
+ * rather than jumping in discrete steps.
+ *
+ * HOW MOVEMENT WORKS:
+ *   Each frame, gameLoop() reads `p.x, p.y, p.targetX, p.targetY, p.speed`
+ *   and moves the gator a tiny step toward their target. When they arrive,
+ *   a new random target is picked.
+ *
+ * ACTIVITY-SPECIFIC MOVEMENT:
+ *   - 'resting':  Snap to house position, mark indoors.
+ *   - 'hosting':  Walk to door; once inside, drift gently within the enclosure bubble.
+ *   - 'visiting': Walk to host's door; once inside, drift within host bubble.
+ *   - 'debating': Walk toward debate target position (in front of house).
+ *   - 'talking':  Close in toward partner; freeze when _conversationFrozen is true
+ *                 (set by agentQueue while AI is in-flight or turns are playing back).
+ *   - default:    Normal wandering toward targetX/targetY; picks new random target on arrival.
+ *
+ * EXECUTE PHASE SPECIAL CASE:
+ *   Only the condemned gator moves. All others are frozen in place while
+ *   they watch the condemned walk to the centre for execution.
+ *
+ * DOM UPDATES:
+ *   After calculating each gator's new position:
+ *     el.style.left / el.style.top  — moves the gator DOM element
+ *     bubbleEl.style.left / .top    — keeps the speech bubble tracking the gator
+ *     el.classList.toggle('indoors'/'indoors-private') — controls CSS visibility
+ */
 function gameLoop() {
     if (!state.paused) {
         const { W, H } = stageBounds();
@@ -785,6 +1024,10 @@ function gameLoop() {
 }
 
 // ── Spawn / lifecycle ─────────────────────────────────────────
+/**
+ * Starts both the tick interval and the rAF loop, and sets the Pause button text.
+ * Called by initSimulation() at startup and by spawnGators() after a respawn.
+ */
 function startAll() {
     state.paused = false;
     document.getElementById('pauseBtn').textContent = '\u23F8 Pause';
@@ -792,14 +1035,47 @@ function startAll() {
     stopRaf(); startRaf();
 }
 
+/**
+ * Stops the tick interval and the rAF loop. Called at game-over and
+ * at the start of spawnGators() to clear state before a fresh run.
+ */
 function stopAll() {
     if (state.tickInterval) { clearInterval(state.tickInterval); state.tickInterval = null; }
     stopRaf();
 }
 
+/** Starts the requestAnimationFrame loop. Saves the handle in state.rafId for cancellation. */
 function startRaf() { state.rafId = requestAnimationFrame(gameLoop); }
+/** Cancels any in-flight rAF handle and nulls state.rafId. */
 function stopRaf()  { if (state.rafId !== null) { cancelAnimationFrame(state.rafId); state.rafId = null; } }
 
+/**
+ * Destroys and recreates the entire simulation from scratch.
+ *
+ * WHAT spawnGators() DOES (in order):
+ *   1. Stops tick loop + rAF loop.
+ *   2. Clears DOM: removes gator elements, bubbles, thought bubbles, house labels,
+ *      talk lines, and old SVG background.
+ *   3. Calls culdesacLayout() to compute fresh house positions.
+ *   4. Calls buildCuldesacSVG() and inserts the new background SVG.
+ *   5. Creates house-label and guest-badge span elements for each house.
+ *   6. Calls createGator(i, house) for each slot → pushes to state.gators[].
+ *   7. Creates the DOM div for each gator (with SVG figure, name label, personality badge).
+ *   8. Calls resetGameState() to clear day counter, dead set, conversation counters, etc.
+ *   9. Calls initRelations() to seed all relations/suspicion to 0.
+ *   10. Picks the MURDERER:
+ *       - Prefers extrovert or grumpy (thematically fitting).
+ *       - Sets murderer.liar = true.
+ *       - Adjusts murderer's perceivedRelations to appear friendly toward everyone
+ *         (the murderer masks their true negative feelings).
+ *   11. POSTs all gator data to /api/agent/initialize to create SK agents on the server.
+ *   12. Calls startAll() to begin the tick loop and rAF loop.
+ *
+ * CALLED BY:
+ *   - initSimulation() via requestAnimationFrame (first run).
+ *   - The Respawn button click handler.
+ *   - The "Restart" button on the game-over overlay.
+ */
 function spawnGators() {
     stopAll();
     state.gators = []; state.nextId = 0;
@@ -931,6 +1207,29 @@ function spawnGators() {
 }
 
 // ── Module entry point ────────────────────────────────────────
+/**
+ * Module initialisation — called once from main.js after the page loads.
+ *
+ * WHAT initSimulation() DOES:
+ *   1. Calls initTooltip() to set up the mouse-follow tooltip panel.
+ *   2. Calls setTickFunction(tick) to give agentQueue a reference to the tick
+ *      function without creating a circular import
+ *      (agentQueue imports simulation.js, simulation.js imports agentQueue.js;
+ *       passing the function reference at runtime breaks the cycle).
+ *   3. Wires up DOM button click handlers:
+ *        #respawnBtn     → spawnGators()
+ *        #goRestartBtn   → spawnGators()  (game-over overlay "Play Again" button)
+ *        #pauseBtn       → toggle state.paused / restart interval / update label
+ *        #testConvBtn    → testConversation() (debug shortcut)
+ *   4. Wires up a window resize handler that regenerates the cul-de-sac layout
+ *      and clamps gator positions to the new stage bounds.
+ *   5. Defers the first spawnGators() call to the NEXT two animation frames
+ *      (requestAnimationFrame → requestAnimationFrame) so the DOM has fully
+ *      rendered and el.clientWidth/clientHeight return accurate values before
+ *      the layout math runs.
+ *
+ * @param {object} agentInterop - Reserved for future Blazor/.NET interop (currently unused).
+ */
 export function initSimulation(agentInterop) {
     initTooltip();
 

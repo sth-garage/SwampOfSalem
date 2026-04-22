@@ -3,10 +3,40 @@
 namespace SwampOfSalem.SK.Prompts;
 
 /// <summary>
-/// Generates personality-driven system prompts for each alligator agent.
+/// Generates the Semantic Kernel system prompt for each alligator agent based on their personality,
+/// role (murderer / liar / towngator), and game rules.
+/// <para>
+/// <b>Why system prompts matter</b><br/>
+/// The system prompt is the agent's "identity card" — it is injected as the very first message
+/// in the agent's <see cref="Microsoft.SemanticKernel.ChatCompletion.ChatHistory"/> and frames
+/// all subsequent dialogue. Everything the agent says flows from this context.
+/// </para>
+/// <para>
+/// <b>Prompt architecture</b>
+/// <list type="number">
+///   <item><description><b>Core prompt</b> — every agent. Establishes swamp identity, game rules, response format, and personality tone.</description></item>
+///   <item><description><b>Murderer addon</b> — secret killer only. Adds strategic deception instructions.</description></item>
+///   <item><description><b>Liar addon</b> — non-murderer liars only. Adds social deception tendencies (rumour-spreading, opinion-flipping).</description></item>
+/// </list>
+/// </para>
+/// <para>
+/// <b>Response contract</b><br/>
+/// All agents are instructed to return ONLY a JSON object:
+/// <code>{"spoken": "what you say aloud", "thought": "your private inner monologue"}</code>
+/// This is enforced in the prompt text. <see cref="SwampOfSalem.SK.Agents.GatorAgentService"/>
+/// parses and validates this format, with a plain-text fallback on parse failure.
+/// </para>
 /// </summary>
 public static class PersonalityPrompts
 {
+    /// <summary>
+    /// Builds the complete system prompt for one alligator agent.
+    /// </summary>
+    /// <param name="name">Display name of the alligator (e.g. "Chomps").</param>
+    /// <param name="personality">The personality archetype that shapes speech tone and strategy.</param>
+    /// <param name="isMurderer"><c>true</c> to append the secret murderer deception instructions.</param>
+    /// <param name="isLiar"><c>true</c> to append non-murderer liar tendencies (ignored if <paramref name="isMurderer"/> is <c>true</c>).</param>
+    /// <returns>A complete multi-section system prompt string ready for injection into <c>ChatHistory</c>.</returns>
     public static string GetSystemPrompt(string name, Personality personality, bool isMurderer, bool isLiar)
     {
         var core = $$"""
@@ -79,6 +109,10 @@ public static class PersonalityPrompts
         return core;
     }
 
+    /// <summary>
+    /// Returns a one-sentence personality description injected into the core prompt.
+    /// This shapes the LLM's speech style, vocabulary, and emotional register.
+    /// </summary>
     private static string GetPersonalityDescription(Personality p) => p switch
     {
         Personality.Cheerful => "You are upbeat, warm, polite, and indirect. You soften bad news and try to see the best in everyone. Your speech is friendly with occasional emoji-like expressions.",
