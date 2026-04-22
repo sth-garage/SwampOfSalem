@@ -11,7 +11,7 @@ html, body {
     height: 100%;
     overflow: hidden;
     font-family: system-ui, sans-serif;
-    background: #071510;
+    background: #112a1a;
     color: #b8d8a8;
 }
 
@@ -292,7 +292,7 @@ button.secondary:hover { background: rgba(30, 65, 28, 0.85); }
     position: relative;
     overflow: hidden;
     /* Deep murky swamp water */
-    background: #0a1e10;
+    background: #1a4225;
     transition: background 3s ease;
 }
 /* Animated water shimmer as a pseudo-element */
@@ -306,15 +306,15 @@ button.secondary:hover { background: rgba(30, 65, 28, 0.85); }
         118deg,
         transparent            0px,
         transparent            38px,
-        rgba(30,90,40,0.04)    38px,
-        rgba(30,90,40,0.04)    40px
+        rgba(40,120,60,0.07)   38px,
+        rgba(40,120,60,0.07)   40px
     ),
     repeating-linear-gradient(
         208deg,
         transparent            0px,
         transparent            55px,
-        rgba(20,60,30,0.035)   55px,
-        rgba(20,60,30,0.035)   57px
+        rgba(30,90,45,0.06)    55px,
+        rgba(30,90,45,0.06)    57px
     );
     animation: waterDrift 28s linear infinite;
     pointer-events: none;
@@ -325,7 +325,7 @@ button.secondary:hover { background: rgba(30, 65, 28, 0.85); }
     to   { transform: translate(60px, 40px); }
 }
 
-#world.night { background: #050e08; }
+#world.night { background: #0a1a0f; }
 
 /* Night overlay */
 #night-overlay {

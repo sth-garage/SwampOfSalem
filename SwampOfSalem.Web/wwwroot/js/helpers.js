@@ -1004,8 +1004,8 @@ export function buildCuldesacSVG(layout) {
       <!-- Deep water base handled by CSS; add subtle depth gradient -->
       <defs>
         <radialGradient id="swampDepth" cx="50%" cy="50%" r="70%">
-          <stop offset="0%"   stop-color="#122818" stop-opacity="0"/>
-          <stop offset="100%" stop-color="#050f08" stop-opacity="0.55"/>
+          <stop offset="0%"   stop-color="#1e5030" stop-opacity="0"/>
+          <stop offset="100%" stop-color="#0d2a15" stop-opacity="0.45"/>
         </radialGradient>
       </defs>
       <rect width="${W}" height="${H}" fill="url(#swampDepth)"/>
