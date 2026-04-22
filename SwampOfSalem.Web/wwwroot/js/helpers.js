@@ -538,6 +538,7 @@ export function randomAppearance(index) {
  * @param {object} p - Person object (reads p.appearance).
  * @returns {string} HTML string of an `<svg>` element.
  */
+export function buildFigureSVG(p) {
     const a  = p.appearance;
     const cx = 30;
     const svgH = 58;
@@ -854,6 +855,7 @@ export function culdesacLayout() {
  * @param {{ cx:number, cy:number, housePositions: object[] }} layout - From culdesacLayout().
  * @returns {string} HTML string of the full `<svg id="culdesac">` element.
  */
+export function buildCuldesacSVG(layout) {
     const el = document.getElementById('world');
     const W  = el.clientWidth, H = el.clientHeight;
     const { cx, cy } = layout;
