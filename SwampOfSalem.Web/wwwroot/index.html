@@ -66,6 +66,56 @@
             outline: none;
             border-color: rgba(80,180,60,.5);
         }
+        /* Dialog mode toggle */
+        .dialog-mode-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            margin-bottom: 1.2rem;
+        }
+        .dialog-mode-toggle label {
+            color: #8ab880;
+            font-size: 0.9rem;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 52px;
+            height: 26px;
+        }
+        .toggle-switch input { display: none; }
+        .toggle-slider {
+            position: absolute;
+            inset: 0;
+            background: rgba(30,80,30,.7);
+            border: 1px solid rgba(60,140,60,.35);
+            border-radius: 26px;
+            cursor: pointer;
+            transition: background .2s;
+        }
+        .toggle-slider:before {
+            content: '';
+            position: absolute;
+            left: 3px; top: 3px;
+            width: 18px; height: 18px;
+            background: #6a9860;
+            border-radius: 50%;
+            transition: transform .2s;
+        }
+        .toggle-switch input:checked + .toggle-slider { background: rgba(20,80,60,.85); }
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+            background: #a8d890;
+        }
+        .toggle-mode-label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            min-width: 60px;
+            text-align: left;
+        }
+        .toggle-mode-label.mode-ai { color: #a8d890; }
+        .toggle-mode-label.mode-gator { color: #6fc8f0; }
         /* Test panel */
         .ai-test-panel { text-align: left; }
         .ai-test-panel h2 { font-size: 1.2rem; color: #a8d890; margin-bottom: .5rem; }
@@ -118,9 +168,13 @@
                         <label for="gatorCountInput">Number of Gators:</label>
                         <input type="number" id="gatorCountInput" min="2" max="9" value="7" />
                     </div>
-                    <div class="gator-count-container">
-                        <label for="maxConvInput">Concurrent Conversations:</label>
-                        <input type="number" id="maxConvInput" min="1" max="5" value="2" />
+                    <div class="dialog-mode-toggle">
+                        <label>Dialog:</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="dialogModeToggle" />
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span class="toggle-mode-label mode-ai" id="dialogModeLabel">🤖 AI</span>
                     </div>
                     <div class="splash-buttons">
                         <button class="btn-primary" id="startGameBtn">▶ Start Game</button>
@@ -228,6 +282,22 @@
             }
         });
 
+        // Update toggle label when the toggle changes
+        document.getElementById('dialogModeToggle').addEventListener('change', function () {
+            const label = document.getElementById('dialogModeLabel');
+            if (this.checked) {
+                label.textContent = '🐊 Gator';
+                label.className = 'toggle-mode-label mode-gator';
+            } else {
+                label.textContent = '🤖 AI';
+                label.className = 'toggle-mode-label mode-ai';
+            }
+        });
+
+        function getSelectedDialogSource() {
+            return document.getElementById('dialogModeToggle').checked ? 'Gator' : 'AI';
+        }
+
         // Start game button
         document.getElementById('startGameBtn').addEventListener('click', async () => {
             // Get the user-selected gator count
@@ -239,26 +309,29 @@
             if (gatorCount > 9) gatorCount = 9;
             gatorCountInput.value = gatorCount; // Update display to show clamped value
 
-            // Get the user-selected concurrent conversation limit
-            const maxConvInput = document.getElementById('maxConvInput');
-            let maxConv = parseInt(maxConvInput.value, 10);
-            if (isNaN(maxConv) || maxConv < 1) maxConv = 1;
-            if (maxConv > 5) maxConv = 5;
-            maxConvInput.value = maxConv;
-
             // Load game config from server and set on window BEFORE importing any JS modules
             const cfgResp = await fetch('/api/game-config');
             window.GameConfig = await cfgResp.json();
 
-            // Override GATOR_COUNT and MAX_CONCURRENT_CONVERSATIONS with user selections
+            // Override GATOR_COUNT with user selection
             window.GameConfig.GATOR_COUNT = gatorCount;
-            window.GameConfig.MAX_CONCURRENT_CONVERSATIONS = maxConv;
 
             document.getElementById('splash').style.display = 'none';
-            const dialogSource = configData?.dialogSource ?? 'AI';
+            const dialogSource = getSelectedDialogSource();
+            const serverMode = dialogSource === 'Gator' ? 'RuleBased' : 'AI';
+            try {
+                await fetch('/api/dialog-source', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dialogSource: serverMode })
+                });
+                console.log(`[DialogSource] Mode set to: ${serverMode}`);
+            } catch (err) {
+                console.warn('[DialogSource] Failed to set mode:', err);
+            }
 
             // Dynamic import so gameConfig.js is not evaluated until window.GameConfig is ready
-            const { initSimulation } = await import('./js/main.js?v=2');
+            const { initSimulation } = await import('./js/main.js?v=3');
             initSimulation(null, dialogSource);
         });
 
@@ -287,24 +360,27 @@
             if (gatorCount > 9) gatorCount = 9;
             gatorCountInput.value = gatorCount;
 
-            // Get the user-selected concurrent conversation limit
-            const maxConvInput = document.getElementById('maxConvInput');
-            let maxConv = parseInt(maxConvInput.value, 10);
-            if (isNaN(maxConv) || maxConv < 1) maxConv = 1;
-            if (maxConv > 5) maxConv = 5;
-            maxConvInput.value = maxConv;
-
             const cfgResp = await fetch('/api/game-config');
             window.GameConfig = await cfgResp.json();
 
-            // Override GATOR_COUNT and MAX_CONCURRENT_CONVERSATIONS with user selections
+            // Override GATOR_COUNT with user selection
             window.GameConfig.GATOR_COUNT = gatorCount;
-            window.GameConfig.MAX_CONCURRENT_CONVERSATIONS = maxConv;
 
             document.getElementById('splash').style.display = 'none';
-            const dialogSource = configData?.dialogSource ?? 'AI';
+            const dialogSource = getSelectedDialogSource();
+            const serverMode = dialogSource === 'Gator' ? 'RuleBased' : 'AI';
+            try {
+                await fetch('/api/dialog-source', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dialogSource: serverMode })
+                });
+                console.log(`[DialogSource] Mode set to: ${serverMode}`);
+            } catch (err) {
+                console.warn('[DialogSource] Failed to set mode:', err);
+            }
 
-            const { initSimulation, testConversation } = await import('./js/main.js?v=2');
+            const { initSimulation, testConversation } = await import('./js/main.js?v=3');
             initSimulation(null, dialogSource);
             // Wait for gators to spawn before triggering the conversation
             setTimeout(() => testConversation(), 2000);

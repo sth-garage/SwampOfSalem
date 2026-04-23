@@ -15,6 +15,7 @@
 	<ProjectReference Include="..\SwampOfSalem.Shared\SwampOfSalem.Shared.csproj" />
 	<ProjectReference Include="..\SwampOfSalem.SK\SwampOfSalem.SK.csproj" />
 	<ProjectReference Include="..\SwampOfSalem.AppLogic\SwampOfSalem.AppLogic.csproj" />
+	<ProjectReference Include="..\SwampOfSalem.Gators\SwampOfSalem.Gators.csproj" />
   </ItemGroup>
 
 </Project>

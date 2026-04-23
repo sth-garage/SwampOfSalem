@@ -23,6 +23,7 @@
 using SwampOfSalem.Shared.DTOs;
 using SwampOfSalem.Shared.Models;
 using SwampOfSalem.SK.Agents;
+using SwampOfSalem.Gators;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 
@@ -69,6 +70,14 @@ else
 // Game state and agent service (in-process, singleton for single-user game)
 builder.Services.AddSingleton<GameState>();
 builder.Services.AddSingleton<GatorAgentService>();
+builder.Services.AddSingleton<GatorBrainService>(sp => new GatorBrainService(sp.GetRequiredService<GameState>()));
+
+// DialogRouter delegates all calls to either GatorAgentService (AI) or GatorBrainService (rule-based)
+// based on a runtime-switchable Mode setting seeded from appsettings "DialogSource".
+builder.Services.AddSingleton<DialogRouter>(sp => new DialogRouter(
+    sp.GetRequiredService<GatorAgentService>(),
+    sp.GetRequiredService<GatorBrainService>(),
+    builder.Configuration["DialogSource"] ?? "AI"));
 
 var app = builder.Build();
 
@@ -80,13 +89,13 @@ app.UseStaticFiles();
 //
 var api = app.MapGroup("/api/agent");
 
-api.MapPost("/initialize", (AlligatorSpawnData[] alligators, GatorAgentService agents) =>
+api.MapPost("/initialize", (AlligatorSpawnData[] alligators, DialogRouter agents) =>
 {
     agents.InitializeFromSpawnData(alligators);
     return Results.Ok();
 });
 
-api.MapPost("/dialog", async (AgentDialogRequest request, GatorAgentService agents) =>
+api.MapPost("/dialog", async (AgentDialogRequest request, DialogRouter agents) =>
 {
     try
     {
@@ -100,7 +109,7 @@ api.MapPost("/dialog", async (AgentDialogRequest request, GatorAgentService agen
     }
 });
 
-api.MapPost("/thought", async (AgentDialogRequest request, GatorAgentService agents) =>
+api.MapPost("/thought", async (AgentDialogRequest request, DialogRouter agents) =>
 {
     try
     {
@@ -115,13 +124,13 @@ api.MapPost("/thought", async (AgentDialogRequest request, GatorAgentService age
     }
 });
 
-api.MapPost("/vote", async (VoteRequest request, GatorAgentService agents) =>
+api.MapPost("/vote", async (VoteRequest request, DialogRouter agents) =>
 {
     var response = await agents.GetVoteAsync(request);
     return Results.Ok(new { voteForId = response.VoteForId });
 });
 
-api.MapPost("/memory", (MemoryRequest request, GatorAgentService agents) =>
+api.MapPost("/memory", (MemoryRequest request, DialogRouter agents) =>
 {
     agents.AddMemory(request.AlligatorId, new MemoryEntry
     {
@@ -133,7 +142,7 @@ api.MapPost("/memory", (MemoryRequest request, GatorAgentService agents) =>
     return Results.Ok();
 });
 
-api.MapPost("/memory/batch", (MemoryBatchRequest request, GatorAgentService agents) =>
+api.MapPost("/memory/batch", (MemoryBatchRequest request, DialogRouter agents) =>
 {
     foreach (var entry in request.Entries)
     {
@@ -148,7 +157,7 @@ api.MapPost("/memory/batch", (MemoryBatchRequest request, GatorAgentService agen
     return Results.Ok();
 });
 
-api.MapPost("/night-report", async (NightReportRequest request, GatorAgentService agents) =>
+api.MapPost("/night-report", async (NightReportRequest request, DialogRouter agents) =>
 {
     try
     {
@@ -162,7 +171,7 @@ api.MapPost("/night-report", async (NightReportRequest request, GatorAgentServic
     }
 });
 
-api.MapPost("/conversation", async (ChatConversationRequest request, GatorAgentService agents) =>
+api.MapPost("/conversation", async (ChatConversationRequest request, DialogRouter agents) =>
 {
     try
     {
@@ -308,7 +317,7 @@ app.MapGet("/api/game-config", () =>
 });
 
 // Configuration info endpoint for the test panel
-app.MapGet("/api/config", (IConfiguration config) =>
+app.MapGet("/api/config", (IConfiguration config, DialogRouter router) =>
 {
     var provider = config["LLM:Provider"] ?? "OpenAI";
     return Results.Ok(new
@@ -320,8 +329,18 @@ app.MapGet("/api/config", (IConfiguration config) =>
         endpoint = provider.Equals("AzureOpenAI", StringComparison.OrdinalIgnoreCase)
             ? config["LLM:AzureOpenAI:Endpoint"] ?? ""
             : config["LLM:OpenAI:Endpoint"] ?? "http://localhost:11434/v1",
-        dialogSource = config["DialogSource"] ?? "AI"
+        dialogSource = router.Mode
     });
+});
+
+// Dialog-source endpoints — let the UI read and switch the active response engine at runtime
+app.MapGet("/api/dialog-source", (DialogRouter router) =>
+    Results.Ok(new { dialogSource = router.Mode }));
+
+app.MapPost("/api/dialog-source", (DialogSourceRequest req, DialogRouter router) =>
+{
+    router.Mode = (req.DialogSource ?? "AI").Trim();
+    return Results.Ok(new { dialogSource = router.Mode });
 });
 
 app.Run();
@@ -333,3 +352,50 @@ record MemoryBatchEntry(int Day, string Type, string Detail, int? RelatedId);
 record MemoryBatchRequest(int AlligatorId, List<MemoryBatchEntry> Entries);
 record TestChatRequest(List<TestChatMessage> Messages);
 record TestChatMessage(bool IsUser, string Text);
+record DialogSourceRequest(string? DialogSource);
+
+// ── DialogRouter ──────────────────────────────────────────────────────────────
+// Wraps GatorAgentService (AI) and GatorBrainService (rule-based) and delegates
+// every call to whichever is currently active. Mode can be switched at runtime
+// via POST /api/dialog-source without restarting the server.
+// ─────────────────────────────────────────────────────────────────────────────
+class DialogRouter(GatorAgentService ai, GatorBrainService brain, string initialMode)
+{
+    /// <summary>Active engine: "AI" (Semantic Kernel) or "RuleBased" (SwampOfSalem.Gators).</summary>
+    public string Mode { get; set; } = initialMode;
+
+    private bool UseAi => !Mode.Equals("RuleBased", StringComparison.OrdinalIgnoreCase);
+
+    public void InitializeFromSpawnData(IEnumerable<AlligatorSpawnData> data)
+    {
+        if (UseAi) ai.InitializeFromSpawnData(data);
+        else brain.InitializeFromSpawnData(data);
+    }
+
+    public void InitializeAgents()
+    {
+        if (UseAi) ai.InitializeAgents();
+        else brain.InitializeAgents();
+    }
+
+    public void AddMemory(int id, MemoryEntry memory)
+    {
+        if (UseAi) ai.AddMemory(id, memory);
+        else brain.AddMemory(id, memory);
+    }
+
+    public Task<AgentDialogResponse> GenerateDialogAsync(AgentDialogRequest req)
+        => UseAi ? ai.GenerateDialogAsync(req) : brain.GenerateDialogAsync(req);
+
+    public Task<DebateRoundResponse> RunDebateRoundAsync(DebateRoundRequest req)
+        => UseAi ? ai.RunDebateRoundAsync(req) : brain.RunDebateRoundAsync(req);
+
+    public Task<VoteResponse> GetVoteAsync(VoteRequest req)
+        => UseAi ? ai.GetVoteAsync(req) : brain.GetVoteAsync(req);
+
+    public Task<ChatConversationResponse> GenerateFullConversationAsync(ChatConversationRequest req)
+        => UseAi ? ai.GenerateFullConversationAsync(req) : brain.GenerateFullConversationAsync(req);
+
+    public Task<NightReportResponse> GenerateNightReportAsync(List<int> aliveIds)
+        => UseAi ? ai.GenerateNightReportAsync(aliveIds) : brain.GenerateNightReportAsync(aliveIds);
+}

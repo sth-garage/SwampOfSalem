@@ -1140,7 +1140,7 @@ function spawnGators() {
  *
  * @param {object} agentInterop - Reserved for future Blazor/.NET interop (currently unused).
  */
-export function initSimulation(agentInterop) {
+export function initSimulation(agentInterop, dialogSource) {
     initTooltip();
 
     // Provide tick function reference to agentQueue to avoid circular import
