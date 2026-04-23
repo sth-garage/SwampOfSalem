@@ -30,7 +30,7 @@ import { PHASE, DAY_TICKS } from './gameConfig.js';
 // GROUPINGS:
 //   Core simulation   — gators, houses, loop handles
 //   Visual maps       — DOM references for bubbles, talk lines, chat enclosures
-//   Day management    — conversation counters and nightfall timers
+//   Day management    — fixed-duration day timer (DAY_TICKS)
 //   Phase state       — which phase is active, cycle timer
 //   Game identifiers  — who the murderer is, who has died
 //   Vote ceremony     — vote order, results, history
@@ -53,13 +53,8 @@ export const state = {
     privateChatBubbles: new Map(), // homeIndex → enclosure DOM element wrapping a hosting pair.
 
     // ── Day management ────────────────────────────────────────────────────
-    // Controls when the Day phase ends and nightfall begins.
-    // Night is NOT triggered purely by cycleTimer — it also requires
-    // completing enough conversations (CONV_LIMIT_FOR_NIGHTFALL).
-    completedConvCount:   0,     // How many full AI conversations have finished today.
-    dayEndTimerActive:    false, // true once CONV_LIMIT_FOR_NIGHTFALL conversations have completed.
-    dayEndTimerExpiresAt: 0,     // Date.now() timestamp when the nightfall delay expires.
-    noNewConversations:   false, // true when nightfall delay expires → no new convs can start.
+    // Days run for a fixed real-time duration (DAY_TICKS). Nightfall fires
+    // when cycleTimer reaches 0.
 
     // ── Conversation mutex ────────────────────────────────────────────────
     // Only ONE full AI conversation can run at a time.
@@ -80,6 +75,20 @@ export const state = {
     voteTarget:    null,        // ID of the gator condemned by the most votes.
     dayNumber:     1,           // Current in-game day. Increments at triggerDawn().
 
+    // ── Debate floor ──────────────────────────────────────────────────────
+    // One-speaker-at-a-time town-meeting: each gator holds the floor for
+    // DEBATE_SPEAK_COOLDOWN ticks, then the floor passes to the next in queue.
+    debateSpeakerQueue:   [], // Array<number> — gator IDs in turn order (cycles repeatedly).
+    debateSpeakerTimer:   0,  // Ticks remaining on the current floor-holder's turn.
+    debateSpeakerWaiting: false, // true while an async AI call is in-flight for the floor-holder.
+    debateTranscript:     [], // Array<{speakerId, speakerName, message}> — what has been said this debate.
+    debateSpeechCount:    0,  // Total speeches made so far this debate (including AI-pending).
+    debateEndAfter:       0,  // Debate ends once debateSpeechCount reaches this value (alive + 3).
+    // debateHistory: cross-day record of every accusation/defence in any debate.
+    // Entries: { day, accuserId, accuserName, targetId, targetName, type, quote }
+    // type = 'accused' | 'defended'
+    debateHistory:        [], // Persists across days so gators remember prior accusations.
+
     // ── Vote ceremony ─────────────────────────────────────────────────────
     // Sequential: showNextVoter() is called each time voteDisplayTimer hits 0.
     voteOrder:        [],  // Array<Person> — living gators in clockwise house-index order.
@@ -92,6 +101,10 @@ export const state = {
     // The condemned gator walks to centre stage; once close enough, executeTimer counts down.
     condemnedId:  null, // ID of the gator walking to their execution.
     executeTimer: 0,    // Ticks after the condemned reaches centre before finaliseExecution() fires.
+
+    // ── Tie-revote ────────────────────────────────────────────────────────
+    tieRevote:           false, // true when we are in a tiebreaker re-vote
+    tieRevoteCandidates: [],    // Array<number> gator IDs that are tied; only these can be voted for
 };
 
 // ── Reset helper — called on respawn ──────────────────────────
@@ -108,10 +121,6 @@ export const state = {
  *   old stale object. Mutating in-place keeps all references valid.
  */
 export function resetGameState() {
-    state.completedConvCount   = 0;
-    state.dayEndTimerActive    = false;
-    state.dayEndTimerExpiresAt = 0;
-    state.noNewConversations   = false;
     state.activeConversation   = false;
     state.isNight       = false;
     state.gamePhase     = PHASE.DAY;
@@ -120,6 +129,13 @@ export function resetGameState() {
     state.nightVictimId = null;
     state.voteTarget    = null;
     state.dayNumber     = 1;
+    state.debateSpeakerQueue   = [];
+    state.debateSpeakerTimer   = 0;
+    state.debateSpeakerWaiting = false;
+    state.debateTranscript     = [];
+    state.debateSpeechCount    = 0;
+    state.debateEndAfter       = 0;
+    state.debateHistory        = [];
     state.voteOrder        = [];
     state.voteIndex        = 0;
     state.voteResults      = {};
@@ -127,5 +143,7 @@ export function resetGameState() {
     state.voteHistory      = [];
     state.condemnedId      = null;
     state.executeTimer     = 0;
+    state.tieRevote           = false;
+    state.tieRevoteCandidates = [];
     state.privateChatBubbles = state.privateChatBubbles ?? new Map();
 }

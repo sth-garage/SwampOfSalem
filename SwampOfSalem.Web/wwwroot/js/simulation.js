@@ -44,8 +44,7 @@ import {
     HOME_WARN_TICKS,
     VOTE_DISPLAY_TICKS,
     CONVICTION_THRESHOLD, GATOR_COUNT,
-    PERSONALITY_EMOJI, MAX_DEBATE_SPEAKERS, DEBATE_SPEAK_COOLDOWN,
-    CONV_LIMIT_FOR_NIGHTFALL
+    PERSONALITY_EMOJI, DEBATE_SPEAK_COOLDOWN
 } from './gameConfig.js';
 import {
     rnd, rndF, rndTicks, stageBounds, dist, weightedPick,
@@ -60,7 +59,7 @@ import { state, resetGameState } from './state.js';
 import {
     triggerNightfall, triggerDawn, triggerDebate, triggerVote,
     triggerExecute, showNextVoter, finaliseExecution,
-    pickDebateSuspect
+    pickDebateSuspect, advanceDebateSpeaker
 } from './phases.js';
 import {
     renderGator, renderAllGators, updateStats, updatePhaseLabel,
@@ -188,19 +187,9 @@ export function logChat(speaker, targetId, message, thought, isPrivate = false) 
  * Called every time a full AI conversation concludes (public or hosting).
  *
  * RESPONSIBILITIES:
- *   1. Clears the global `state.activeConversation` flag so new conversations
- *      can start on the next tick.
- *   2. Increments `state.completedConvCount` — the day-end trigger watches this.
- *   3. Once completedConvCount reaches CONV_LIMIT_FOR_NIGHTFALL (defined in
- *      gameConfig.js, mirrored from GameConstants.cs), starts a 1-minute
- *      countdown (`state.dayEndTimerExpiresAt`) after which nightfall is triggered
- *      if all ongoing conversations have finished.
- *
- * WHY a conversation limit rather than a fixed time?
- *   Without a limit, the day could end in the middle of a conversation, cutting
- *   off the AI mid-sentence. The limit ensures at least N full conversations happen
- *   before nightfall can begin. The 1-minute delay after hitting the limit gives
- *   any in-progress conversations time to naturally finish.
+ *   Clears the global `state.activeConversation` flag so new conversations
+ *   can start on the next tick. Days are purely time-based (DAY_TICKS);
+ *   nightfall fires when the cycle timer expires.
  *
  * CALL SITES:
  *   - simulation.js tick() — when two street-talking gators finish their conversation
@@ -210,12 +199,7 @@ export function logChat(speaker, targetId, message, thought, isPrivate = false) 
  */
 function _onConversationCompleted() {
     state.activeConversation = false;
-    state.completedConvCount++;
-    console.log(`[Day] Conversation #${state.completedConvCount} completed.`);
-    if (!state.dayEndTimerActive && state.completedConvCount >= CONV_LIMIT_FOR_NIGHTFALL) {
-        state.dayEndTimerActive = true;
-        console.log(`[Day] ${CONV_LIMIT_FOR_NIGHTFALL} conversations done — nightfall will start after current conversations finish`);
-    }
+    console.log('[Day] Conversation completed.');
 }
 
 // ── Opinion sharing helper ────────────────────────────────────
@@ -353,19 +337,11 @@ function _maybeShareOpinion(speaker, listener) {
  *        DEBATE → triggerVote()
  *        VOTE   → triggerExecute()
  *
- * 3. CONVERSATION-LIMIT NIGHTFALL
- *    - Once state.completedConvCount >= CONV_LIMIT_FOR_NIGHTFALL, a 1-minute
- *      timer runs. When it expires, state.noNewConversations = true.
- *    - When noNewConversations is true, any active hosting sessions are
- *      force-aborted (ticksLeft set to 1) so they wind down quickly.
- *    - When no gators are left talking, triggerNightfall() fires immediately
- *      regardless of the cycleTimer.
- *
- * 4. HOME WARNING
+ * 3. HOME WARNING
  *    - At HOME_WARN_TICKS ticks remaining in the day, all active conversations
  *      are cut short and every gator starts walking home.
  *
- * 5. PHASE-SPECIFIC BRANCHES
+ * 4. PHASE-SPECIFIC BRANCHES
  *    - VOTE phase: advances the sequential vote cursor on a timer.
  *    - EXECUTE phase: moves the condemned gator to centre, then finalises.
  *    - NIGHT phase: returns early (no gator logic during night).
@@ -407,29 +383,6 @@ function tick() {
         else if (state.gamePhase === PHASE.VOTE)   { triggerExecute();   return; }
     }
 
-    // Conversation-limit nightfall: once conv limit is hit, lock new convs and wait for all to finish
-    if (state.gamePhase === PHASE.DAY && state.dayEndTimerActive) {
-        if (!state.noNewConversations) {
-            state.noNewConversations = true;
-            console.log(`[Day] Conversation limit reached — blocking new conversations, waiting for active ones to finish`);
-        }
-        if (state.noNewConversations) {
-            // Force-abort any in-progress hosting so they can wind down this tick
-            for (const p of living()) {
-                if (p.activity === 'hosting' || p.activity === 'visiting') {
-                    p._convTurns = [];
-                    p.isWaiting  = false;
-                    if (p.ticksLeft > 1) p.ticksLeft = 1;
-                }
-            }
-            const anyTalking = living().some(p => p.talkingTo !== null || p.activity === 'hosting' || p.activity === 'visiting');
-            if (!anyTalking) {
-                triggerNightfall();
-                return;
-            }
-        }
-    }
-
     // At HOME_WARN_TICKS left in the day, end all conversations and walk everyone home
     if (state.gamePhase === PHASE.DAY && state.cycleTimer === HOME_WARN_TICKS) {
         for (const p of living()) {
@@ -445,6 +398,20 @@ function tick() {
             }
         }
         state.talkLines.forEach(l => l.remove()); state.talkLines.clear();
+    }
+
+    // Debate floor: one speaker at a time — advance when their timer expires.
+    // debateSpeakerWaiting is true while an async AI call is in-flight; we freeze
+    // the timer so the floor doesn't advance before the AI responds.
+    if (state.gamePhase === PHASE.DEBATE) {
+        if (!state.debateSpeakerWaiting) {
+            state.debateSpeakerTimer--;
+            if (state.debateSpeakerTimer <= 0) {
+                advanceDebateSpeaker();
+            }
+        }
+        updatePhaseLabel();
+        // Still run per-gator movement below (they walk to their positions)
     }
 
     // Sequential vote: advance to next voter each VOTE_DISPLAY_TICKS ticks
@@ -497,11 +464,7 @@ function tick() {
         ).map(p => p.id)
     );
 
-    // Count current speakers in debate so we can cap simultaneous speech
-    let debateSpeakerCount = 0;
-    if (state.gamePhase === PHASE.DEBATE) {
-        debateSpeakerCount = activePeople.filter(p => p.activity === 'debating' && !!p.message).length;
-    }
+    // (debate speaker count tracking removed — floor is now managed by advanceDebateSpeaker())
 
     for (const gator of activePeople) {
         gator.ticksLeft--;
@@ -509,51 +472,6 @@ function tick() {
         // Thoughts are handled in gameLoop() on real-time schedules per gator.
         // Speech cooldowns are also real-time; check Date.now() against nextSpeakAt.
         const now = Date.now();
-        const canSpeak = now >= gator.nextSpeakAt;
-
-        // Conversation turn-taking is handled by the full-conversation drain timer.
-        // During an ongoing talk, just let the drain timer advance the turns.
-        if (gator.activity === 'debating' && gator.ticksLeft > 0) {
-            if (canSpeak && debateSpeakerCount < MAX_DEBATE_SPEAKERS) {
-                const suspect = pickDebateSuspect(gator);
-                if (suspect) {
-                    const lines = [
-                        `I suspect ${suspect.name}!`,
-                        `Watch out for ${suspect.name}…`,
-                        `${suspect.name} is acting suspicious.`,
-                        `Don't trust ${suspect.name}.`
-                    ];
-                    gator.message = lines[rnd(lines.length)];
-                } else {
-                    const lines = [`I didn't do it!`, `Leave me out of this.`, `It wasn't me!`];
-                    gator.message = lines[rnd(lines.length)];
-                }
-
-                // Persuasion: high-conviction persons influence liked neighbours
-                if (suspect && gator.conviction > CONVICTION_THRESHOLD) {
-                    const listeners = living().filter(q =>
-                        q.id !== gator.id &&
-                        (gator.relations[q.id] ?? 0) > 10
-                    );
-                    if (listeners.length > 0) {
-                        const listener = listeners[rnd(listeners.length)];
-                        const liking = Math.max(0, listener.relations[gator.id] ?? 0);
-                        const influence = (liking / 100) * 22 + 5;
-                        listener.suspicion[suspect.id] = Math.min(100,
-                            (listener.suspicion[suspect.id] ?? 0) + influence);
-                        listener.conviction = Math.min(100, Math.max(
-                            listener.conviction, listener.suspicion[suspect.id]));
-                        gator.history.push({ day: state.dayNumber, type: 'persuaded', target: listener.id, about: suspect.id, detail: `Tried to convince ${listener.name} that ${suspect.name} is guilty` });
-                    }
-                }
-
-                const debateMs = 3000 + Math.random() * 5000;
-                gator.nextSpeakAt = now + debateMs;
-                debateSpeakerCount++;
-            } else if (!canSpeak && gator.nextSpeakAt - now < 800) {
-                gator.message = null;
-            }
-        }
 
         // Invitation disabled — conversations limited to 2 alligators
 

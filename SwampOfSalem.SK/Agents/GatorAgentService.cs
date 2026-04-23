@@ -409,7 +409,7 @@ public class GatorAgentService
                 sb.AppendLine("You are defending yourself during the debate — someone suspects you. Deny it convincingly. Keep it SHORT (1-2 sentences).");
                 break;
             case "debate":
-                sb.AppendLine("You are in the debate phase. Argue your case — accuse someone, back up a claim, or defend yourself. Stay in character. Keep it SHORT (1-2 sentences).");
+                sb.AppendLine("You are in the debate phase. You MUST give a specific reason for your accusation — reference something you heard, saw, or that was said in the debate. Example: \"It's Gully because I heard him say something strange to Alex about the victim\" or \"I saw Chomps near the swamp that night.\" If others have made accusations, respond to them. Do NOT just say \"vote for X\" without a real reason. Stay in character. Keep it SHORT (1-2 sentences).");
                 break;
             case "mourn":
                 sb.AppendLine("Someone was killed last night. React with grief, shock, anger, or suspicion — whatever fits your personality. Keep it SHORT (1-2 sentences).");
@@ -665,6 +665,15 @@ public class GatorAgentService
             var memories = _memories.TryGetValue(id, out var mem) ? mem : [];
             var memLines = memories.TakeLast(8).Select(m => $"  [{m.Type}] {m.Detail}");
 
+            // Include recent debate accusation history so the agent can reason from it
+            var debateAccusations = memories
+                .Where(m => m.Type is "past_debate_accuse" or "past_debate_accused_me" or "past_debate_overheard")
+                .TakeLast(10)
+                .Select(m => $"  [debate] {m.Detail}");
+            var debateSection = debateAccusations.Any()
+                ? $"\nDebate accusation history (use this to figure out who the murderer is):\n{string.Join("\n", debateAccusations)}"
+                : string.Empty;
+
             var systemPrompt = PersonalityPrompts.GetSystemPrompt(
                 gator.Name, gator.Personality, gator.IsMurderer, gator.IsLiar);
 
@@ -677,13 +686,14 @@ public class GatorAgentService
                 {{{string.Join("\n", others)}}}
 
                 Your recent memories:
-                {{{string.Join("\n", memLines)}}}
+                {{{string.Join("\n", memLines)}}}{{{debateSection}}}
 
+                Pay close attention to the debate accusation history — who accused whom, who defended themselves, and what reasons they gave. Use this to reason about who the murderer might be.
                 Based on your memories and feelings, who do you suspect most of being the murderer?
                 Respond ONLY with a JSON object in this exact format (no markdown):
                 {{
                   "topSuspectId": <id number or null>,
-                  "suspicionReason": "<1-2 sentences>",
+                  "suspicionReason": "<1-2 sentences referencing specific debate statements or behaviour>",
                   "innerThought": "<private thought, 1 sentence>"
                 }}
                 """;

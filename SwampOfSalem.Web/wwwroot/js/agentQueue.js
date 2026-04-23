@@ -53,7 +53,7 @@
 // requestFullConversation() sets isWaiting on both gators (showing thinking
 // bubbles) while the AI call is in-flight, then plays back turns automatically.
 
-import { isAgentAvailable, getFullConversation, addAgentMemory, getNightReport, flushMemories } from './agentBridge.js';
+import { isAgentAvailable, getAgentDialog, getFullConversation, addAgentMemory, getNightReport, flushMemories } from './agentBridge.js';
 import { state } from './state.js';
 import { living } from './gator.js';
 import { logChat } from './simulation.js';
@@ -398,8 +398,11 @@ function _renderNightGatorList(entries) {
     listEl.innerHTML = alive.map(p => {
         const entry = entries.find(e => e.alligatorId === p.id);
         const suspectName = entry?.topSuspectName ?? '—';
-        return `<div class="nr-gator-row" data-id="${p.id}">
-            <span class="nr-gator-name">${p.name}</span>
+        const isMurderer = p.id === state.murdererId;
+        const murdererClass = isMurderer ? ' nr-murderer' : '';
+        const murdererBadge = isMurderer ? `<span class="nr-murderer-badge">☠ Murderer</span>` : '';
+        return `<div class="nr-gator-row${murdererClass}" data-id="${p.id}">
+            <span class="nr-gator-name">${p.name}${murdererBadge}</span>
             <span class="nr-gator-suspect">suspects <strong>${suspectName}</strong></span>
         </div>`;
     }).join('');
@@ -485,7 +488,7 @@ function _showNightGatorDetail(g, entry) {
 
     detail.innerHTML = `
         <div class="nr-detail-header">
-            <span class="nr-detail-name">${g.name}</span>
+            <span class="nr-detail-name">${g.name}${g.id === state.murdererId ? `<span class="nr-murderer-badge">☠ Murderer</span>` : ''}</span>
             <span class="nr-detail-meta">${g.personality}</span>
         </div>
         <div class="nr-detail-stats">
@@ -499,4 +502,111 @@ function _showNightGatorDetail(g, entry) {
         <div class="panel-section-title">Conversations</div>
         <div class="nr-conv-list">${convHtml}</div>`;
 }
+
+// ── Debate speech request ─────────────────────────────────────
+
+/**
+ * Requests one AI-generated debate speech for the floor-holder.
+ *
+ * CONTEXT PASSED TO THE AI:
+ *   - The victim's name (who was murdered last night).
+ *   - The full transcript of what has been said so far this debate round
+ *     (max last 10 lines to keep the prompt concise).
+ *   - The speaker's current top suspect and their suspicion score.
+ *   - A memory of any past-debate accusations involving this speaker.
+ *
+ * The speaker's buffered memories (which include past-debate accusation entries)
+ * are flushed to the server before the call so the AI's ChatHistory is current.
+ *
+ * @param {object} speaker        - The gator object currently holding the floor.
+ * @param {object|null} suspect   - The gator the speaker most suspects, or null.
+ * @param {object|null} victim    - The gator killed last night, or null.
+ * @returns {Promise<string>} The spoken debate line, or a scripted fallback on error.
+ */
+export async function requestDebateSpeech(speaker, suspect, victim) {
+    if (!isAgentAvailable()) return _debateFallback(speaker, suspect);
+
+    // Flush this speaker's memories so the AI has up-to-date accusation history
+    const entries = _memoryBuffer.get(speaker.id);
+    if (entries && entries.length > 0) {
+        _memoryBuffer.delete(speaker.id);
+        await flushMemories(speaker.id, entries);
+    }
+
+    // Build the debate context string
+    const victimLine = victim ? `${victim.name} was murdered last night.` : 'Someone was murdered last night.';
+
+    // Include the last 10 transcript entries so the AI can react to what's been said
+    const recentLines = (state.debateTranscript ?? []).slice(-10)
+        .map(e => `${e.speakerName}: "${e.message}"`)
+        .join('\n');
+
+    const suspectLine = suspect
+        ? `Your top suspect is ${suspect.name} (suspicion: ${Math.round(speaker.suspicion?.[suspect.id] ?? 0)}/100).`
+        : 'You have no strong suspect yet.';
+
+    // Build cross-day accusation history relevant to this speaker
+    const debateHist = state.debateHistory ?? [];
+    const relevantHistory = debateHist.slice(-20); // cap to last 20 entries
+    let historySection = '';
+    if (relevantHistory.length > 0) {
+        const lines = relevantHistory.map(e => {
+            if (e.type === 'accused') return `Day ${e.day}: ${e.accuserName} accused ${e.targetName}: "${e.quote}"`;
+            if (e.type === 'defended') return `Day ${e.day}: ${e.accuserName} defended themselves: "${e.quote}"`;
+            return null;
+        }).filter(Boolean);
+        if (lines.length > 0) historySection = `PAST DEBATE HISTORY (use as evidence):\n${lines.join('\n')}`;
+    }
+
+    // Pull the speaker's recent chat log as potential evidence
+    const chatEvidence = (speaker.chatLog ?? [])
+        .filter(e => e.message && e.message.length > 0)
+        .slice(-8)
+        .map(e => {
+            const fromName = state.gators.find(p => p.id === e.from)?.name ?? '?';
+            const toName   = state.gators.find(p => p.id === e.to)?.name ?? '?';
+            return `Day ${e.day ?? state.dayNumber}: ${fromName} said to ${toName}: "${e.message}"`;
+        })
+        .join('\n');
+    const evidenceSection = chatEvidence.length > 0
+        ? `THINGS YOU WITNESSED OR HEARD:\n${chatEvidence}`
+        : '';
+
+    const reasonInstruction = suspect
+        ? `You believe ${suspect.name} is the murderer. Give a SPECIFIC reason — reference something you saw, heard, or something said in this debate. For example: "It's ${suspect.name} because I heard them say [something suspicious] to [someone]" or "I saw ${suspect.name} acting strange near the victim" or "${suspect.name} was quick to blame [someone else] to throw us off." You MUST give a reason — do NOT just say "vote for them."`
+        : `You have no clear suspect. React to what others have said or express suspicion of someone based on their specific behaviour or words you have witnessed.`;
+
+    const context = [
+        victimLine,
+        `DEBATE SO FAR:\n${recentLines || '(No one has spoken yet.)'}`,
+        historySection,
+        evidenceSection,
+        suspectLine,
+        reasonInstruction,
+    ].filter(s => s.length > 0).join('\n\n');
+
+    try {
+        const result = await getAgentDialog(speaker.id, 'debate', null, context);
+        return result?.spoken || _debateFallback(speaker, suspect);
+    } catch (e) {
+        console.warn('[debate] AI call failed, using fallback:', e);
+        return _debateFallback(speaker, suspect);
+    }
+}
+
+function _debateFallback(speaker, suspect) {
+    if (suspect) {
+        return [
+            `Everyone, vote for ${suspect.name}!`,
+            `I'm convinced it's ${suspect.name} — vote them out!`,
+            `${suspect.name} is guilty. We need to act now.`,
+        ][Math.floor(Math.random() * 3)];
+    }
+    return [
+        `I didn't do it — don't vote for me!`,
+        `It wasn't me! Look elsewhere.`,
+        `Vote for someone else — I'm innocent!`,
+    ][Math.floor(Math.random() * 3)];
+}
+
 

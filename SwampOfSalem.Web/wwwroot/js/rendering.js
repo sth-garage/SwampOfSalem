@@ -54,44 +54,28 @@ export function updatePhaseLabel() {
     const timerEl = document.getElementById('nightfall-timer');
     if (timerEl) {
         if (state.gamePhase === PHASE.DAY && state.cycleTimer > 0) {
-            if (state.dayEndTimerActive && state.dayEndTimerExpiresAt > 0) {
-                // Show the 1-minute conversation-limit countdown
-                const msLeft = Math.max(0, state.dayEndTimerExpiresAt - Date.now());
-                if (state.noNewConversations) {
-                    timerEl.textContent = `🌙 Night coming — finishing conversations…`;
-                    timerEl.style.color = '#ff6040';
-                    timerEl.style.borderColor = 'rgba(200,60,40,.4)';
-                } else {
-                    const secsLeft = Math.ceil(msLeft / 1000);
-                    const mins = Math.floor(secsLeft / 60);
-                    const secs = secsLeft % 60;
-                    timerEl.textContent = `🌙 Night in ${mins}:${secs.toString().padStart(2, '0')} (no new conversations after)`;
-                    timerEl.style.color = secsLeft <= 10 ? '#ff6040' : '';
-                    timerEl.style.borderColor = secsLeft <= 10 ? 'rgba(200,60,40,.4)' : '';
-                }
-                timerEl.classList.add('visible');
+            const secsLeft = Math.ceil(state.cycleTimer * TICK_MS / 1000);
+            const mins = Math.floor(secsLeft / 60);
+            const secs = secsLeft % 60;
+            timerEl.textContent = `🌙 Nightfall in ${mins}:${secs.toString().padStart(2, '0')}`;
+            timerEl.classList.add('visible');
+            if (state.cycleTimer <= HOME_WARN_TICKS) {
+                timerEl.style.color = '#ff6040';
+                timerEl.style.borderColor = 'rgba(200,60,40,.4)';
             } else {
-                const secsLeft = Math.ceil(state.cycleTimer * TICK_MS / 1000);
-                const mins = Math.floor(secsLeft / 60);
-                const secs = secsLeft % 60;
-                timerEl.textContent = `\u{1F319} Nightfall in ${mins}:${secs.toString().padStart(2, '0')}`;
-                timerEl.classList.add('visible');
-                if (state.cycleTimer <= HOME_WARN_TICKS) {
-                    timerEl.style.color = '#ff6040';
-                    timerEl.style.borderColor = 'rgba(200,60,40,.4)';
-                } else {
-                    timerEl.style.color = '';
-                    timerEl.style.borderColor = '';
-                }
+                timerEl.style.color = '';
+                timerEl.style.borderColor = '';
             }
         } else {
             timerEl.classList.remove('visible');
         }
     }
-    let voteLabel = `\uD83D\uDDF3\uFE0F Voting...`;
+    let voteLabel = state.tieRevote ? `🔁 Tie! Re-voting...` : `🗳️ Voting...`;
     if (state.gamePhase === PHASE.VOTE && state.voteIndex < state.voteOrder.length) {
         const voter = state.voteOrder[state.voteIndex];
-        if (voter) voteLabel = `\uD83D\uDDF3\uFE0F ${voter.name} is voting... (${state.voteIndex + 1}/${state.voteOrder.length})`;
+        if (voter) voteLabel = state.tieRevote
+            ? `🔁 Tie Re-Vote — ${voter.name} is voting... (${state.voteIndex + 1}/${state.voteOrder.length})`
+            : `🗳️ ${voter.name} is voting... (${state.voteIndex + 1}/${state.voteOrder.length})`;
     }
     let executeLabel = `\u2694\uFE0F Execution...`;
     if (state.gamePhase === PHASE.EXECUTE && state.condemnedId !== null) {

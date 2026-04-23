@@ -42,7 +42,7 @@ import { rnd, rndF, speakDelayMs } from './helpers.js';
 import { living } from './gator.js';
 import { state } from './state.js';
 import { renderAllGators, updateStats, updatePhaseLabel, updateHouseGuests, showDeadBody } from './rendering.js';
-import { requestDialog, recordMemory, requestNightReport } from './agentQueue.js';
+import { requestDialog, recordMemory, requestNightReport, requestFullConversation, requestDebateSpeech } from './agentQueue.js';
 
 // ── Helpers ───────────────────────────────────────────────────
 function setNightOverlay(night) {
@@ -156,6 +156,20 @@ export function pickDebateSuspect(p) {
  *   player dismisses the panel.
  */
 export function triggerNightfall() {
+    // If only 2 gators remain and the murderer is one of them, they win instantly.
+    const alive = living();
+    if (alive.length <= 2 && alive.some(p => p.id === state.murdererId)) {
+        const victim = alive.find(p => p.id !== state.murdererId);
+        if (victim) {
+            state.deadIds.add(victim.id);
+            victim.deathOrder = state.deadIds.size;
+            victim.deathDay   = state.dayNumber;
+            victim.deathType  = 'murdered';
+        }
+        triggerGameOver(false);
+        return;
+    }
+
     state.gamePhase      = PHASE.NIGHT;
     state.isNight        = true;
     state.cycleTimer     = NIGHT_TICKS;
@@ -273,33 +287,35 @@ export function triggerDawn() {
  *      c. Compute conviction = max suspicion score (+ 80 bonus for murderer).
  *      d. Call pickDebateSuspect() to find their accusation target.
  *      e. recordMemory() with 'debate_start' event.
- *   3. Stagger first speech:
- *      - First MAX_DEBATE_SPEAKERS gators from a shuffled order get an
- *        immediate accusation message.
- *      - Rest get a delayed nextSpeakAt (2s + (index × 1.5s) + random noise).
- *        This staggers the chorus so messages don't all appear simultaneously.
+ *   3. Floor queue:
+ *      - All living gators are shuffled into state.debateSpeakerQueue.
+ *      - advanceDebateSpeaker() is called immediately to give the first gator the floor.
+ *      - The tick loop in simulation.js decrements state.debateSpeakerTimer each tick;
+ *        when it hits 0, advanceDebateSpeaker() is called again for the next speaker.
+ *      - The queue cycles (wraps around) until DEBATE_TICKS expire.
  *
- * PERSUASION (runs on subsequent ticks in simulation.js):
- *   When a gator speaks with conviction > CONVICTION_THRESHOLD, they can
- *   nudge the suspicion scores of trusted nearby gators toward their target.
+ * PERSUASION (fires in advanceDebateSpeaker() when the floor-holder yields):
+ *   When a gator speaks with conviction > CONVICTION_THRESHOLD, they nudge the
+ *   suspicion scores of ALL other gators toward their target (not just nearby ones),
+ *   weighted by how much each listener trusts the speaker.
  *   This allows charismatic / convinced gators to sway the vote.
  *
- * NOTE: This is the only phase where gators speak continuously without AI.
- *   Debate lines are scripted templates ("I suspect {name}!") rather than
- *   LLM-generated, because the AI is too slow for rapid-fire accusation exchange.
+ * NOTE: This is the only phase where gators speak without AI calls.
+ *   Debate lines are scripted templates rather than LLM-generated, because the AI
+ *   is too slow for rapid-fire accusation exchange.
  */
 export function triggerDebate() {
     state.gamePhase  = PHASE.DEBATE;
     state.cycleTimer = DEBATE_TICKS;
 
     const alive = living();
+
     // Seed suspicion & position everyone at their doors
     for (const p of alive) {
         p.activity  = 'debating';
         p.indoors   = false;
         p.ticksLeft = DEBATE_TICKS;
         p.message   = null;
-        p.nextSpeakAt = Date.now() + Math.round(Math.random() * 1500); // tiny random offset before stagger loop overwrites
         const h    = state.houses[p.homeIndex];
         const outX = Math.cos(h.angle + Math.PI) * 18;
         const outY = Math.sin(h.angle + Math.PI) * 18;
@@ -322,28 +338,150 @@ export function triggerDebate() {
         recordMemory(p.id, state.dayNumber, 'debate_start', `Debate began. Most suspicious of ${suspect?.name || 'no one'}.`, suspect?.id ?? null);
     }
 
-    const shuffled = alive.slice().sort(() => Math.random() - 0.5);
-    for (let i = 0; i < shuffled.length; i++) {
-        const p = shuffled[i];
-        if (i < MAX_DEBATE_SPEAKERS) {
-            const suspect = pickDebateSuspect(p);
-            if (suspect) {
-                p.message = `I suspect ${suspect.name}!`;
-                p.history.push({ day: state.dayNumber, type: 'debate_accused', target: suspect.id, detail: `Accused ${suspect.name} during debate` });
-            } else {
-                p.message = `I didn't do it!`;
-                p.history.push({ day: state.dayNumber, type: 'debate_defended', detail: `Defended self during debate` });
-            }
-            p.thought = null;
-            p.nextSpeakAt = Date.now() + 3000 + Math.random() * 5000;
-        } else {
-            p.nextSpeakAt = Date.now() + 2000 + i * 1500 + Math.round(Math.random() * 2000);
-        }
-    }
+    // Build the floor queue — randomise the first round so it's not always
+    // the same gator who opens the debate.
+    state.debateSpeakerQueue   = alive.slice().sort(() => Math.random() - 0.5).map(p => p.id);
+    state.debateSpeakerTimer   = 0;
+    state.debateSpeakerWaiting = false;
+    state.debateTranscript     = [];
+    state.debateSpeechCount    = 0;
+    state.debateEndAfter       = alive.length + 3; // everyone speaks once, then 3 more turns
+
+    // Give the floor to the first speaker immediately
+    advanceDebateSpeaker();
 
     renderAllGators();
     updateStats();
     updatePhaseLabel();
+}
+
+// ── Debate floor advancement ───────────────────────────────────
+
+/**
+ * Passes the debate floor to the next gator in the queue.
+ *
+ * Called by:
+ *   - triggerDebate() (first speaker)
+ *   - simulation.js tick() when debateSpeakerTimer hits 0 and debateSpeakerWaiting is false
+ *
+ * SEQUENCE:
+ *   1. Check end condition: if debateSpeechCount >= debateEndAfter → triggerVote().
+ *   2. Clear the previous speaker's message bubble.
+ *   3. Apply persuasion for the outgoing speaker.
+ *   4. Rotate the queue (front → back); skip dead gators.
+ *   5. Set debateSpeakerWaiting = true (freeze the floor timer).
+ *   6. Call requestDebateSpeech() → AI generates a reasoned accusation/defence.
+ *   7. Display the speech, add to debateTranscript, record memory.
+ *   8. Set debateSpeakerTimer; clear debateSpeakerWaiting.
+ */
+export function advanceDebateSpeaker() {
+    // Check end condition first
+    if (state.debateSpeechCount >= state.debateEndAfter && state.debateEndAfter > 0) {
+        // Debate is over — clear all bubbles and move to vote
+        for (const p of living()) p.message = null;
+        triggerVote();
+        return;
+    }
+
+    // Clear previous speaker's bubble and apply persuasion
+    const prevId = state.debateSpeakerQueue[0];
+    const prev   = prevId !== undefined ? state.gators.find(p => p.id === prevId) : null;
+    if (prev) {
+        const prevSuspect = pickDebateSuspect(prev);
+        if (prevSuspect && prev.conviction > 0) {
+            for (const listener of living()) {
+                if (listener.id === prev.id) continue;
+                const liking    = Math.max(0, listener.relations[prev.id] ?? 0);
+                const influence = (liking / 100) * 20 + 3;
+                listener.suspicion[prevSuspect.id] = Math.min(100,
+                    (listener.suspicion[prevSuspect.id] ?? 0) + influence);
+                listener.conviction = Math.min(100, Math.max(
+                    listener.conviction ?? 0, listener.suspicion[prevSuspect.id]));
+            }
+        }
+        prev.message = null;
+    }
+
+    // Rotate queue
+    if (state.debateSpeakerQueue.length > 1) {
+        state.debateSpeakerQueue.push(state.debateSpeakerQueue.shift());
+    }
+
+    // Skip dead gators
+    let attempts = 0;
+    while (attempts < state.debateSpeakerQueue.length) {
+        if (!state.deadIds.has(state.debateSpeakerQueue[0])) break;
+        state.debateSpeakerQueue.push(state.debateSpeakerQueue.shift());
+        attempts++;
+    }
+
+    const speakerId = state.debateSpeakerQueue[0];
+    const speaker   = speakerId !== undefined ? state.gators.find(p => p.id === speakerId) : null;
+    if (!speaker || state.deadIds.has(speaker.id)) {
+        // No valid speaker — set a short timer and try again
+        const [dMin, dMax] = Array.isArray(DEBATE_SPEAK_COOLDOWN) ? DEBATE_SPEAK_COOLDOWN : [DEBATE_SPEAK_COOLDOWN, DEBATE_SPEAK_COOLDOWN];
+        state.debateSpeakerTimer = dMin + rnd(dMax - dMin + 1);
+        return;
+    }
+
+    const suspect = pickDebateSuspect(speaker);
+    const victim  = state.nightVictimId !== null
+        ? state.gators.find(p => p.id === state.nightVictimId) ?? null
+        : null;
+
+    // Freeze the floor timer while the AI call is in-flight
+    state.debateSpeakerWaiting = true;
+    state.debateSpeechCount++;
+
+    requestDebateSpeech(speaker, suspect, victim).then(spoken => {
+        // Bail if the phase has already advanced (e.g. vote triggered mid-AI call)
+        if (state.gamePhase !== PHASE.DEBATE) return;
+
+        speaker.message = spoken;
+        speaker.thought = null;
+
+        // Append to the running transcript
+        state.debateTranscript.push({
+            speakerId:   speaker.id,
+            speakerName: speaker.name,
+            message:     spoken,
+        });
+
+        // Record as a memory for all gators so they can reference it in future debates
+        if (suspect) {
+            // Speaker's own memory: "I accused X"
+            recordMemory(speaker.id, state.dayNumber, 'past_debate_accuse',
+                `In the Day ${state.dayNumber} debate I accused ${suspect.name}: "${spoken}"`, suspect.id);
+            // Suspect's memory: "X accused me"
+            recordMemory(suspect.id, state.dayNumber, 'past_debate_accused_me',
+                `${speaker.name} accused me during the Day ${state.dayNumber} debate: "${spoken}"`, speaker.id);
+            // All other gators: "X accused Y"
+            for (const g of living()) {
+                if (g.id === speaker.id || g.id === suspect.id) continue;
+                recordMemory(g.id, state.dayNumber, 'past_debate_overheard',
+                    `${speaker.name} accused ${suspect.name} in the Day ${state.dayNumber} debate: "${spoken}"`, speaker.id);
+            }
+            speaker.history.push({ day: state.dayNumber, type: 'debate_accused', target: suspect.id, detail: `Accused ${suspect.name}: "${spoken}"` });
+            // Cross-day debate history — persists so future debates can reference it
+            state.debateHistory.push({ day: state.dayNumber, accuserId: speaker.id, accuserName: speaker.name, targetId: suspect.id, targetName: suspect.name, type: 'accused', quote: spoken });
+        } else {
+            recordMemory(speaker.id, state.dayNumber, 'past_debate_defend',
+                `In the Day ${state.dayNumber} debate I defended myself: "${spoken}"`, null);
+            for (const g of living()) {
+                if (g.id === speaker.id) continue;
+                recordMemory(g.id, state.dayNumber, 'past_debate_overheard',
+                    `${speaker.name} defended themselves in the Day ${state.dayNumber} debate: "${spoken}"`, speaker.id);
+            }
+            speaker.history.push({ day: state.dayNumber, type: 'debate_defended', detail: `Defended self: "${spoken}"` });
+            // Cross-day debate history — persists so future debates can reference it
+            state.debateHistory.push({ day: state.dayNumber, accuserId: speaker.id, accuserName: speaker.name, targetId: null, targetName: null, type: 'defended', quote: spoken });
+        }
+
+        // Release the floor timer
+        const [dMin, dMax] = Array.isArray(DEBATE_SPEAK_COOLDOWN) ? DEBATE_SPEAK_COOLDOWN : [DEBATE_SPEAK_COOLDOWN, DEBATE_SPEAK_COOLDOWN];
+        state.debateSpeakerTimer   = dMin + rnd(dMax - dMin + 1);
+        state.debateSpeakerWaiting = false;
+    });
 }
 
 // ── Vote ────────────────────────────────────────────────────────
@@ -370,7 +508,11 @@ export function triggerDebate() {
  * @returns {object|null} The Person object they vote to execute, or null (abstain).
  */
 export function decideVote(voter) {
-    const alive = living().filter(q => q.id !== voter.id);
+    // During a tie-revote, only the tied candidates may be voted for
+    const pool = state.tieRevote && state.tieRevoteCandidates.length > 0
+        ? living().filter(q => q.id !== voter.id && state.tieRevoteCandidates.includes(q.id))
+        : living().filter(q => q.id !== voter.id);
+    const alive = pool;
     if (alive.length === 0) return null;
 
     if (voter.id === state.murdererId) {
@@ -411,13 +553,20 @@ export function decideVote(voter) {
  *   When it hits 0, tick() increments state.voteIndex and calls showNextVoter().
  *   This creates the "one vote at a time" dramatic reveal effect.
  */
-export function triggerVote() {
+export function triggerVote(tiedCandidateIds = null) {
     state.gamePhase        = PHASE.VOTE;
     state.voteOrder        = living().slice().sort(() => Math.random() - 0.5);
     state.voteIndex        = 0;
     state.voteResults      = {};
     state.voteDisplayTimer = VOTE_DISPLAY_TICKS;
     state.cycleTimer       = state.voteOrder.length * (VOTE_DISPLAY_TICKS + 1) + 2;
+    if (tiedCandidateIds) {
+        state.tieRevote           = true;
+        state.tieRevoteCandidates = tiedCandidateIds;
+    } else {
+        state.tieRevote           = false;
+        state.tieRevoteCandidates = [];
+    }
     for (const p of living()) p.message = null;
     showNextVoter();
 }
@@ -535,11 +684,47 @@ export function updateVoteTally() {
  * walks close enough to the centre (checked in simulation.js tick()).
  */
 export function triggerExecute() {
-    let topId = null, topCount = 0;
-    for (const [id, cnt] of Object.entries(state.voteResults)) {
-        if (cnt > topCount) { topCount = cnt; topId = parseInt(id); }
+    // Find the maximum vote count
+    let topCount = 0;
+    for (const cnt of Object.values(state.voteResults)) {
+        if (cnt > topCount) topCount = cnt;
     }
-    state.voteTarget = topId;
+
+    // Collect all IDs that share that top count
+    const tiedIds = topCount > 0
+        ? Object.entries(state.voteResults)
+            .filter(([, cnt]) => cnt === topCount)
+            .map(([id]) => parseInt(id))
+        : [];
+
+    if (tiedIds.length > 1) {
+        // There is a tie
+        if (state.tieRevote) {
+            // Already had one revote — pick a random victim from the tied set
+            const randomVictimId = tiedIds[Math.floor(Math.random() * tiedIds.length)];
+            state.voteTarget = randomVictimId;
+            for (const p of living()) {
+                if (p.id !== randomVictimId) p.message = `It had to be done… drew lots.`;
+            }
+            state.tieRevote           = false;
+            state.tieRevoteCandidates = [];
+        } else {
+            // First tie — re-run the vote restricted to just the tied candidates.
+            // Bump cycleTimer so the tick loop doesn't re-fire triggerExecute() before
+            // the 3-second timeout has a chance to call triggerVote(tiedIds).
+            state.cycleTimer = 999;
+            document.querySelectorAll('.voting-active').forEach(e => e.classList.remove('voting-active'));
+            for (const p of living()) {
+                p.message = `It's a tie! Vote again between: ${tiedIds.map(id => state.gators.find(g => g.id === id)?.name).join(' & ')}`;
+            }
+            updateVoteTally();
+            renderAllGators();
+            setTimeout(() => triggerVote(tiedIds), 3000);
+            return;
+        }
+    } else {
+        state.voteTarget = tiedIds.length === 1 ? tiedIds[0] : null;
+    }
 
     for (const entry of state.voteHistory) {
         for (const p of living()) {
@@ -663,8 +848,13 @@ export function finaliseExecution() {
 
     const murdererDead = state.deadIds.has(state.murdererId);
     const aliveCount   = living().length;
-    if (murdererDead || aliveCount <= 1) {
-        triggerGameOver(murdererDead);
+    if (murdererDead) {
+        triggerGameOver(true);
+        return;
+    }
+    // Murderer wins if they are one of the last 2 (or fewer) alive
+    if (aliveCount <= 2) {
+        triggerGameOver(false);
         return;
     }
     // Start new day
@@ -692,6 +882,212 @@ export function finaliseExecution() {
     updateHouseGuests();
     updateStats();
     updatePhaseLabel();
+}
+
+// ── Game Summary PDF ────────────────────────────────────────────
+
+/**
+ * Builds a comprehensive print-ready HTML document covering the entire game,
+ * opens it in a new tab, and triggers window.print() so the user can save as PDF.
+ *
+ * Sections:
+ *   1. Cover — outcome, killer identity
+ *   2. By Day — for each day: night victim, debate transcript, vote tally, execution
+ *   3. By Alligator — for each gator: role, personality, relationships, full history
+ */
+export function generateGameSummaryPDF() {
+    const killer     = state.gators.find(p => p.id === state.murdererId);
+    const townWins   = state.deadIds.has(state.murdererId);
+    const maxDay     = state.dayNumber;
+
+    // ── helpers ──────────────────────────────────────────────────
+    function esc(s) {
+        if (s == null) return '';
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function gatorName(id) {
+        return esc(state.gators.find(p => p.id === id)?.name ?? `#${id}`);
+    }
+
+    // ── BY-DAY section ────────────────────────────────────────────
+    let byDayHtml = '';
+    for (let day = 1; day <= maxDay; day++) {
+        byDayHtml += `<div class="section"><h2>Day ${day}</h2>`;
+
+        // Night victim (victim's deathDay is day+1 because dawn increments dayNumber)
+        const nightVictim = state.gators.find(p => p.deathType === 'murdered' && p.deathDay === day + 1);
+        if (nightVictim) {
+            byDayHtml += `<p class="event murder">🔪 <strong>${esc(nightVictim.name)}</strong> was murdered during Night ${day}.</p>`;
+        }
+
+        // Debate transcript for this day
+        const dayDebate = state.debateHistory.filter(e => e.day === day);
+        if (dayDebate.length > 0) {
+            byDayHtml += `<h3>Debate</h3><table><tr><th>Speaker</th><th>Type</th><th>About</th><th>Quote</th></tr>`;
+            for (const e of dayDebate) {
+                byDayHtml += `<tr>
+                    <td>${esc(e.accuserName)}</td>
+                    <td>${e.type === 'accused' ? '⚔️ Accused' : '🛡 Defended'}</td>
+                    <td>${e.targetName ? esc(e.targetName) : '—'}</td>
+                    <td class="quote">"${esc(e.quote)}"</td>
+                </tr>`;
+            }
+            byDayHtml += `</table>`;
+        }
+
+        // Votes cast on this day — collect from each gator's history
+        const dayVoteEntries = [];
+        for (const g of state.gators) {
+            const voteEntry = g.history.find(h => h.type === 'voted' && h.day === day);
+            if (voteEntry) dayVoteEntries.push({ voterId: g.id, targetId: voteEntry.target });
+        }
+        if (dayVoteEntries.length > 0) {
+            const tally = {};
+            for (const v of dayVoteEntries) tally[v.targetId] = (tally[v.targetId] || 0) + 1;
+            byDayHtml += `<h3>Vote</h3><table><tr><th>Voter</th><th>Voted For</th></tr>`;
+            for (const v of dayVoteEntries) {
+                byDayHtml += `<tr><td>${gatorName(v.voterId)}</td><td>${gatorName(v.targetId)}</td></tr>`;
+            }
+            byDayHtml += `</table><p class="tally">Tally: ${Object.entries(tally).map(([id,c]) => `${gatorName(parseInt(id))} — ${c}`).join(', ')}</p>`;
+        }
+
+        // Execution on this day
+        const executed = state.gators.find(p => p.deathType === 'executed' && p.deathDay === day);
+        if (executed) {
+            const wasKiller = executed.id === state.murdererId;
+            byDayHtml += `<p class="event execute">⚔️ <strong>${esc(executed.name)}</strong> was executed${wasKiller ? ' — <em>The Killer!</em>' : ''}.</p>`;
+        }
+
+        byDayHtml += `</div>`;
+    }
+
+    // ── BY-ALLIGATOR section ──────────────────────────────────────
+    let byGatorHtml = '';
+    const sorted = [...state.gators].sort((a, b) => {
+        const ad = state.deadIds.has(a.id), bd = state.deadIds.has(b.id);
+        if (ad !== bd) return ad ? 1 : -1;
+        return (a.deathOrder || 0) - (b.deathOrder || 0);
+    });
+
+    for (const p of sorted) {
+        const isKiller    = p.id === state.murdererId;
+        const isDead      = state.deadIds.has(p.id);
+        const personality = p.personality.charAt(0).toUpperCase() + p.personality.slice(1);
+        const deathInfo   = isDead
+            ? ` — ${p.deathType === 'murdered' ? '🔪 Murdered' : '⚔️ Executed'} on Day ${p.deathDay ?? '?'}`
+            : ' — Survived';
+
+        byGatorHtml += `<div class="section gator-section">
+            <h2>${esc(p.name)} <span class="role-badge ${isKiller ? 'killer' : 'town'}">${isKiller ? '🔪 KILLER' : '🐊 Town'}${p.liar ? ' · Liar' : ''}</span></h2>
+            <p><strong>Personality:</strong> ${personality}${deathInfo}</p>`;
+
+        // Relationships
+        const rels = Object.entries(p.relations ?? {});
+        if (rels.length > 0) {
+            byGatorHtml += `<h3>Relationships at Game End</h3><table><tr><th>Gator</th><th>Feeling</th></tr>`;
+            for (const [otherId, val] of rels.sort((a,b) => b[1]-a[1])) {
+                const feel = val > 30 ? 'Friendly' : val < -30 ? 'Hostile' : 'Neutral';
+                byGatorHtml += `<tr><td>${gatorName(parseInt(otherId))}</td><td>${feel} (${val > 0 ? '+' : ''}${Math.round(val)})</td></tr>`;
+            }
+            byGatorHtml += `</table>`;
+        }
+
+        // Suspicion scores
+        const susps = Object.entries(p.suspicion ?? {}).filter(([,v]) => v > 0);
+        if (susps.length > 0) {
+            byGatorHtml += `<h3>Suspicion Scores</h3><table><tr><th>Suspect</th><th>Score</th></tr>`;
+            for (const [sid, sv] of susps.sort((a,b) => b[1]-a[1])) {
+                byGatorHtml += `<tr><td>${gatorName(parseInt(sid))}</td><td>${Math.round(sv)}</td></tr>`;
+            }
+            byGatorHtml += `</table>`;
+        }
+
+        // History events
+        if (p.history && p.history.length > 0) {
+            byGatorHtml += `<h3>Event History</h3><ul>`;
+            for (const h of p.history) {
+                byGatorHtml += `<li>[Day ${h.day}] ${esc(h.detail ?? h.type)}</li>`;
+            }
+            byGatorHtml += `</ul>`;
+        }
+
+        // Conversations (chatLog)
+        if (p.chatLog && p.chatLog.length > 0) {
+            byGatorHtml += `<h3>Conversations (${p.chatLog.length} messages)</h3>
+            <table><tr><th>Day</th><th>From</th><th>To</th><th>Message</th></tr>`;
+            for (const c of p.chatLog) {
+                if (!c.message) continue;
+                byGatorHtml += `<tr>
+                    <td>${c.day ?? '?'}</td>
+                    <td>${esc(c.from ?? p.name)}</td>
+                    <td>${esc(c.to ?? '')}</td>
+                    <td>${esc(c.message)}</td>
+                </tr>`;
+            }
+            byGatorHtml += `</table>`;
+        }
+
+        byGatorHtml += `</div>`;
+    }
+
+    // ── Full HTML document ────────────────────────────────────────
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Swamp of Salem — Game Summary</title>
+<style>
+  body { font-family: Georgia, serif; font-size: 13px; color: #111; margin: 2cm; }
+  h1   { font-size: 2em; margin-bottom: .2em; }
+  h2   { font-size: 1.4em; border-bottom: 2px solid #333; margin-top: 1.4em; page-break-after: avoid; }
+  h3   { font-size: 1.1em; margin-top: 1em; margin-bottom: .3em; color: #444; }
+  .section { page-break-inside: avoid; margin-bottom: 2em; }
+  .gator-section { page-break-before: auto; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: .8em; font-size: .9em; }
+  th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; }
+  th { background: #eee; font-weight: bold; }
+  tr:nth-child(even) { background: #f9f9f9; }
+  .quote { font-style: italic; }
+  .event { margin: .5em 0; padding: .4em .7em; border-radius: 4px; }
+  .murder  { background: #fff0f0; border-left: 4px solid #c00; }
+  .execute { background: #fff8e0; border-left: 4px solid #a80; }
+  .tally   { font-weight: bold; margin: .3em 0; }
+  .role-badge { font-size: .75em; padding: 2px 7px; border-radius: 10px; vertical-align: middle; }
+  .killer { background: #ffdddd; color: #900; }
+  .town   { background: #ddf0dd; color: #060; }
+  .cover  { text-align: center; margin-bottom: 3em; padding: 2em; border: 2px solid #555; border-radius: 8px; }
+  @media print { .no-print { display: none; } }
+</style>
+</head>
+<body>
+<div class="cover">
+  <h1>🐊 Swamp of Salem</h1>
+  <h2 style="border:none;">${townWins ? '🌿 The Swamp Won!' : '🔪 The Killer Won!'}</h2>
+  <p>The killer was <strong>${esc(killer?.name ?? 'Unknown')}</strong> (${esc(killer?.personality ?? '')}).</p>
+  <p>Game lasted <strong>${maxDay} day${maxDay !== 1 ? 's' : ''}</strong> with <strong>${state.gators.length} alligators</strong>.</p>
+  <p style="font-size:.85em;color:#555;">Generated ${new Date().toLocaleString()}</p>
+</div>
+
+<h1>📅 Game by Day</h1>
+${byDayHtml}
+
+<h1>🐊 Game by Alligator</h1>
+${byGatorHtml}
+</body>
+</html>`;
+
+    const win = window.open('', '_blank');
+    if (win) {
+        win.document.write(html);
+        win.document.close();
+        win.focus();
+        setTimeout(() => win.print(), 800);
+    }
 }
 
 /**
@@ -730,7 +1126,17 @@ export function triggerGameOver(townWins) {
             : '\uD83D\uDD2A Killer Wins!';
         overlay.querySelector('.go-body').innerHTML = townWins
             ? `The swamp correctly identified <strong>${killer ? killer.name : 'the killer'}</strong> as the murderer!<br>Justice has been served.`
-            : `<strong>${killer ? killer.name : 'The killer'}</strong> outlasted every gator and got away with it.`;
+            : (() => {
+                // Find the last victim to determine how the killer won
+                const lastVictim = [...state.deadIds].map(id => state.gators.find(p => p.id === id))
+                    .filter(p => p && p.id !== state.murdererId)
+                    .sort((a, b) => (b.deathOrder || 0) - (a.deathOrder || 0))[0];
+                const killerName = killer ? killer.name : 'The killer';
+                if (lastVictim && lastVictim.deathType === 'murdered' && living().length <= 1) {
+                    return `<strong>${killerName}</strong> was left alone with <strong>${lastVictim.name}</strong> and struck them down in the night. The swamp falls silent.`;
+                }
+                return `<strong>${killerName}</strong> outlasted every gator and got away with it.`;
+            })();
 
         // Build character list
         const charactersEl = document.getElementById('go-characters');
@@ -781,6 +1187,12 @@ export function triggerGameOver(townWins) {
         }
 
         overlay.style.display = 'flex';
+
+        // Wire the PDF summary button
+        const pdfBtn = document.getElementById('goSummaryBtn');
+        if (pdfBtn) {
+            pdfBtn.onclick = () => generateGameSummaryPDF();
+        }
     }
     updatePhaseLabel();
     updateStats();

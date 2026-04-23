@@ -960,9 +960,30 @@ button.secondary:hover { background: rgba(30, 65, 28, 0.85); }
 }
 .nr-gator-row:hover   { background: rgba(30,80,30,.35); border-left-color: rgba(60,140,60,.4); }
 .nr-gator-row.nr-selected { background: rgba(40,100,40,.4); border-left-color: #50a858; }
+.nr-gator-row.nr-murderer {
+    background: rgba(80, 10, 10, 0.45);
+    border-left-color: #cc2222;
+}
+.nr-gator-row.nr-murderer:hover   { background: rgba(100,15,15,.55); border-left-color: #ee3333; }
+.nr-gator-row.nr-murderer.nr-selected { background: rgba(120,20,20,.6); border-left-color: #ff4444; }
 .nr-gator-name    { font-size: .88rem; font-weight: 700; color: #c8e0a8; }
+.nr-gator-row.nr-murderer .nr-gator-name { color: #ff9090; }
 .nr-gator-suspect { font-size: .74rem; color: #7a9068; }
 .nr-gator-suspect strong { color: #ff8888; }
+.nr-murderer-badge {
+    display: inline-block;
+    font-size: .65rem;
+    font-weight: 700;
+    letter-spacing: .05em;
+    color: #ff4444;
+    background: rgba(120,0,0,.55);
+    border: 1px solid rgba(200,40,40,.4);
+    border-radius: 4px;
+    padding: .05rem .35rem;
+    margin-left: .4rem;
+    vertical-align: middle;
+    text-transform: uppercase;
+}
 .nr-loading { padding: 1rem; font-size: .84rem; color: #5a7050; font-style: italic; }
 .nr-none    { font-size: .74rem; color: #4a5a40; font-style: italic; }
 

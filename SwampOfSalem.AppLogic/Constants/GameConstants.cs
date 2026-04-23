@@ -31,19 +31,6 @@ public static class GameConstants
     /// </summary>
     public const int MaxConcurrentConversations = 2;
 
-    /// <summary>
-    /// Total AI conversations that trigger the automatic nightfall countdown.
-    /// Once this many full conversations complete during the Day phase,
-    /// the nightfall timer (<see cref="NightfallDelayMs"/>) starts ticking.
-    /// </summary>
-    public const int ConvLimitForNightfall = 7;
-
-    /// <summary>
-    /// Milliseconds of real-time inactivity after the conversation limit is hit
-    /// before the game automatically advances to the Night phase (3 minutes).
-    /// </summary>
-    public const int NightfallDelayMs = 180_000;
-
     // ── Tick / timing ──────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -90,8 +77,8 @@ public static class GameConstants
 
     // ── Day / night cycle (all values in simulation ticks) ─────────────────────────────
 
-    /// <summary>Maximum ticks the Day phase can run (~818 × 2.2 s ≈ 30 min). Forces nightfall when reached.</summary>
-    public const int DayTicks = 818;
+    /// <summary>Ticks the Day phase lasts (136 × 2.2 s ≈ 5 min). Nightfall always fires when this expires.</summary>
+    public const int DayTicks = 136;
 
     /// <summary>Ticks the Night phase lasts — near-instant black screen (2 × 2.2 s ≈ 4 s).</summary>
     public const int NightTicks = 2;
@@ -99,8 +86,8 @@ public static class GameConstants
     /// <summary>Ticks the Dawn discovery sequence shows (6 × 2.2 s ≈ 13 s).</summary>
     public const int DawnTicks = 6;
 
-    /// <summary>Maximum ticks for the Debate phase (14 × 2.2 s ≈ 30 s).</summary>
-    public const int DebateTicks = 14;
+    /// <summary>Maximum ticks for the Debate phase (55 × 2.2 s ≈ 2 min). Gives AI debate convs time to play out.</summary>
+    public const int DebateTicks = 55;
 
     /// <summary>Ticks before nightfall when a "go home!" warning overlay is shown.</summary>
     public const int HomeWarnTicks = 5;
