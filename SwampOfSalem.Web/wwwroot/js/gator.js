@@ -279,8 +279,20 @@ export function driftRelations(a, b) {
     }
 
     // Step 4: Apply the drift to both directions (clamped to [-100, +100]).
-    a.relations[b.id] = Math.max(-100, Math.min(100, (a.relations[b.id] ?? 0) + driftA));
-    b.relations[a.id] = Math.max(-100, Math.min(100, (b.relations[a.id] ?? 0) + driftB));
+    const prevA = a.relations[b.id] ?? 0;
+    const prevB = b.relations[a.id] ?? 0;
+    a.relations[b.id] = Math.max(-100, Math.min(100, prevA + driftA));
+    b.relations[a.id] = Math.max(-100, Math.min(100, prevB + driftB));
+
+    // Record notable drift into history so the summary can explain reputation changes
+    const deltaA = Math.round(a.relations[b.id] - prevA);
+    const deltaB = Math.round(b.relations[a.id] - prevB);
+    if (Math.abs(deltaA) >= 5) {
+        a.history.push({ day: state.dayNumber, type: 'relation_drift', with: b.id, delta: deltaA, detail: `Relationship with ${b.name} shifted by ${deltaA > 0 ? '+' : ''}${deltaA} after spending time together.` });
+    }
+    if (Math.abs(deltaB) >= 5) {
+        b.history.push({ day: state.dayNumber, type: 'relation_drift', with: a.id, delta: deltaB, detail: `Relationship with ${a.name} shifted by ${deltaB > 0 ? '+' : ''}${deltaB} after spending time together.` });
+    }
 
     // Step 5: Update perceivedRelations to account for liars.
     // A liar with a strongly negative relation pretends to feel positive — they hide hatred.

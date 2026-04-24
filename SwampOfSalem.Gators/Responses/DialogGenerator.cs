@@ -1,6 +1,7 @@
 using SwampOfSalem.Gators.Phrases;
 using SwampOfSalem.Gators.Thinking;
 using SwampOfSalem.Shared.DTOs;
+using SwampOfSalem.Shared.Enums;
 using SwampOfSalem.Shared.Models;
 
 namespace SwampOfSalem.Gators.Responses;
@@ -79,6 +80,14 @@ public static class DialogGenerator
             "execute_react"  => PhraseBanks.ExecuteReact,
             _                => dialogType,
         };
+
+        // Mood conversation overlay for non-murderers (~60 % chance when mood is active)
+        if (gator.Mood != Mood.Normal && !MoodPhraseBanks.AvoidsSocialising(gator.Mood))
+        {
+            var moodPhrases = MoodPhraseBanks.GetConversation(gator.Mood);
+            if (moodPhrases.Length > 0 && rng.Next(5) < 3)
+                return Sub(ThoughtEngine.Pick(moodPhrases, rng), gator.Name, targetName, suspectName, victimName, decoyName);
+        }
 
         var phrases = PhraseBanks.Get(gator.Personality, bankKey, tier);
         return Sub(ThoughtEngine.Pick(phrases, rng), gator.Name, targetName, suspectName, victimName, decoyName);

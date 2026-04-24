@@ -2,6 +2,7 @@
 
 namespace SwampOfSalem.Shared.Models;
 
+
 /// <summary>
 /// Core domain model representing a single alligator character in the Swamp of Salem simulation.
 /// <para>
@@ -46,6 +47,20 @@ public class Alligator
     /// </list>
     /// </summary>
     public Personality Personality { get; set; }
+
+    /// <summary>
+    /// The alligator's current emotional state. Unlike <see cref="Personality"/> (fixed at spawn),
+    /// Mood is dynamic — it shifts in response to game events such as murders, votes, betrayals,
+    /// and conversation outcomes. Mood modifies dialogue tone, vote scoring, and topic selection.
+    /// Defaults to <see cref="Mood.Normal"/>.
+    /// </summary>
+    public Mood Mood { get; set; } = Mood.Normal;
+
+    /// <summary>
+    /// Day number on which the current mood was last set.
+    /// Used by <c>MoodEvaluator</c> to expire time-limited moods after one day.
+    /// </summary>
+    public int MoodSetDay { get; set; } = 0;
 
     /// <summary>
     /// Zero-based index of the alligator's home house on the culde-sac layout.
@@ -158,4 +173,13 @@ public class Alligator
     /// preferentially kill whoever suspects them the most.
     /// </summary>
     public Dictionary<int, double> Suspicion { get; set; } = [];
+
+    // ── Clique membership ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The ID of the <see cref="Clique"/> this alligator currently belongs to,
+    /// or <c>null</c> if they are unaffiliated.
+    /// Assigned by <c>CliqueService.FormCliques</c> and updated on deaths.
+    /// </summary>
+    public int? CliqueId { get; set; }
 }

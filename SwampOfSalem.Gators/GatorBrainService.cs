@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using SwampOfSalem.Gators.Neural;
 using SwampOfSalem.Gators.Responses;
 using SwampOfSalem.Gators.Thinking;
 using SwampOfSalem.Shared.DTOs;
@@ -17,20 +18,24 @@ namespace SwampOfSalem.Gators;
 /// suspicion/relationship scores, and game-state logic.
 /// </para>
 /// <para>
-/// <b>Random seeding strategy</b><br/>
-/// A fresh <see cref="Random"/> is created for each public call using
-/// <c>gatorId ^ dayNumber ^ hashCode(dialogType)</c> so that the same request
-/// always produces the same phrase while different days/types yield variety.
+/// <b>Neural layer</b><br/>
+/// Each living alligator also runs a <see cref="GatorBrainThread"/> on a dedicated
+/// background thread. The thread continuously runs a 64→96→48 feed-forward network,
+/// producing suspicion nudges, mood suggestions, social-need adjustments, and
+/// inter-gator influence signals. Outputs are applied via
+/// <see cref="NeuralBrainOrchestrator.ApplyOutputs"/> before each decision point.
 /// </para>
 /// </summary>
-public class GatorBrainService
+public class GatorBrainService : IDisposable
 {
     private readonly GameState _gameState;
     private readonly ConcurrentDictionary<int, List<MemoryEntry>> _memories = new();
+    private readonly NeuralBrainOrchestrator _neural;
 
     public GatorBrainService(GameState gameState)
     {
         _gameState = gameState;
+        _neural    = new NeuralBrainOrchestrator(gameState);
     }
 
     // ── Initialization ───────────────────────────────────────────────────────
@@ -78,6 +83,12 @@ public class GatorBrainService
             if (data.IsMurderer) _gameState.MurdererId = data.Id;
             _memories.TryAdd(data.Id, []);
         }
+
+        // Record starting population for panic-escalation calculations
+        _gameState.StartingPopulation = _gameState.Alligators.Count;
+
+        // Form initial cliques from spawn-time relation seeds
+        CliqueService.FormCliques(_gameState);
     }
 
     /// <summary>
@@ -86,6 +97,7 @@ public class GatorBrainService
     public void InitializeAgents()
     {
         _memories.Clear();
+        _neural.StopAll();
         foreach (var gator in _gameState.Alligators.Where(a => a.IsAlive))
             _memories.TryAdd(gator.Id, []);
     }
@@ -98,6 +110,14 @@ public class GatorBrainService
     public void AddMemory(int alligatorId, MemoryEntry memory)
     {
         _memories.GetOrAdd(alligatorId, _ => []).Add(memory);
+
+        // Re-evaluate mood whenever new information arrives
+        var gator = _gameState.Alligators.FirstOrDefault(a => a.Id == alligatorId);
+        if (gator is not null)
+        {
+            var mem = _memories.GetOrAdd(alligatorId, _ => []);
+            MoodEvaluator.Evaluate(gator, _gameState, mem, BuildContext(gator));
+        }
     }
 
     // ── Dialog ───────────────────────────────────────────────────────────────
@@ -190,6 +210,9 @@ public class GatorBrainService
         var rng = MakeRng(gator.Id, _gameState.DayNumber, "vote");
         var memories = _memories.GetOrAdd(gator.Id, _ => []);
 
+        // Apply any accumulated neural suggestions (suspicion nudges, mood) before deciding
+        _neural.ApplyOutputs();
+
         var (voteForId, reasoning) = VoteDecider.Decide(
             gator, request.CandidateIds, _gameState, memories, rng);
 
@@ -200,6 +223,9 @@ public class GatorBrainService
             Detail            = $"Voted for {_gameState.Alligators.FirstOrDefault(a => a.Id == voteForId)?.Name ?? "unknown"}: {reasoning}",
             RelatedAlligatorId = voteForId,
         });
+
+        // Re-evaluate mood after committing a vote
+        MoodEvaluator.Evaluate(gator, _gameState, memories, BuildContext(gator));
 
         return Task.FromResult(new VoteResponse
         {
@@ -234,6 +260,9 @@ public class GatorBrainService
         var iMem = _memories.GetOrAdd(initiator.Id, _ => []);
         var rMem = _memories.GetOrAdd(responder.Id, _ => []);
 
+        // Apply neural outputs so mood/suspicion nudges are current before the conversation
+        _neural.ApplyOutputs();
+
         var result = ConversationBuilder.Build(request, initiator, responder,
             _gameState, iMem, rMem, rng);
 
@@ -251,6 +280,12 @@ public class GatorBrainService
             });
         }
 
+        // Re-evaluate mood for both participants after the conversation
+        var iCtx = BuildContext(initiator, justHadPositiveConversation: true);
+        MoodEvaluator.Evaluate(initiator, _gameState, iMem, iCtx);
+        var rCtx = BuildContext(responder, justHadPositiveConversation: true);
+        MoodEvaluator.Evaluate(responder, _gameState, rMem, rCtx);
+
         return Task.FromResult(result);
     }
 
@@ -267,10 +302,159 @@ public class GatorBrainService
             aliveIds.ToDictionary(id => id, id => _memories.GetOrAdd(id, _ => [])));
 
         var report = NightReporter.Report(aliveIds, _gameState, memoriesSnapshot, rng);
+
+        // Reward surviving gators for making it through the night
+        _neural.RewardNightSurvival(aliveIds, _gameState.MurdererId);
+
+        // Night is a major event — re-evaluate all living gators' moods
+        // Update clique membership now that someone may have died
+        CliqueService.UpdateCliques(_gameState);
+
+        foreach (var id in aliveIds)
+        {
+            var gator = _gameState.Alligators.FirstOrDefault(a => a.Id == id);
+            if (gator is null) continue;
+            var mem = _memories.GetOrAdd(id, _ => []);
+            MoodEvaluator.Evaluate(gator, _gameState, mem, BuildContext(gator));
+        }
+
         return Task.FromResult(report);
     }
 
     // ── RNG factory ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds an <see cref="EvaluationContext"/> for <paramref name="gator"/> based on
+    /// current game state and their memory log. Used to drive <see cref="MoodEvaluator"/>.
+    /// </summary>
+    private EvaluationContext BuildContext(Alligator gator, bool justHadPositiveConversation = false)
+    {
+        var living = _gameState.Alligators.Where(a => a.IsAlive).ToList();
+        var mem    = _memories.GetOrAdd(gator.Id, _ => []);
+
+        // Count current-round votes against this gator
+        int votesAgainst = mem.Count(m => m.Type == "vote" &&
+            m.RelatedAlligatorId == gator.Id &&
+            m.Day == _gameState.DayNumber);
+
+        // Is this gator the vote leader?
+        var voteLeaderId = mem
+            .Where(m => m.Type == "vote" && m.Day == _gameState.DayNumber)
+            .GroupBy(m => m.RelatedAlligatorId)
+            .OrderByDescending(g => g.Count())
+            .Select(g => g.Key)
+            .FirstOrDefault();
+        bool isVoteLeader = voteLeaderId == gator.Id;
+
+        // Deaths this game
+        var dead = _gameState.Alligators.Where(a => !a.IsAlive).ToList();
+        int murderCount = dead.Count;
+
+        // Ally-death tracking (relation > 30 == ally)
+        var deadAllies = dead.Where(d => gator.Relations.GetValueOrDefault(d.Id, 0) >= 30).ToList();
+        bool closeFriendDied = deadAllies.Any();
+        int lastAllyDeathDay = closeFriendDied ? _gameState.DayNumber : 0; // approximation
+
+        // Best ally died THIS night: last dead whose relation was highest
+        bool bestAllyDiedThisNight = deadAllies.Any() &&
+            mem.Any(m => m.Type == "death" && m.Day == _gameState.DayNumber &&
+                deadAllies.Any(a => a.Id == m.RelatedAlligatorId));
+
+        // All allies dead?
+        bool allAlliesDead = closeFriendDied &&
+            _gameState.Alligators
+                .Where(a => a.IsAlive && a.Id != gator.Id)
+                .All(a => gator.Relations.GetValueOrDefault(a.Id, 0) < 30);
+
+        // Overheard own name as suspect
+        bool overheardSelf = mem.Any(m =>
+            m.Type == "overheard" &&
+            m.Detail != null &&
+            m.Detail.Contains(gator.Name, StringComparison.OrdinalIgnoreCase));
+
+        // Times voted against without execution
+        int timesVotedAgainst = mem.Count(m =>
+            m.Type == "voted_against" || (m.Type == "vote" && m.RelatedAlligatorId == gator.Id));
+
+        // Obsession streak: same suspect targeted consecutively
+        var topSuspectToday = gator.Suspicion
+            .OrderByDescending(kv => kv.Value)
+            .Select(kv => (int?)kv.Key)
+            .FirstOrDefault();
+        int obsessionDays = topSuspectToday.HasValue
+            ? mem.Count(m => m.Type == "vote" &&
+                m.RelatedAlligatorId == topSuspectToday.Value)
+            : 0;
+
+        // Murder happened nearby approximation (any death this day)
+        bool murderNearby = dead.Any() && _gameState.DayNumber > 1;
+
+        // ── Clique context ────────────────────────────────────────────────────
+        var clique = CliqueService.GetClique(gator, _gameState);
+
+        bool cliqueMateKilledThisNight = clique is not null &&
+            dead.Any(d => clique.MemberIds.Contains(d.Id) &&
+                mem.Any(m => m.Type == "death" && m.Day == _gameState.DayNumber &&
+                    m.RelatedAlligatorId == d.Id));
+
+        bool rivalCliqueAccusing = false;
+        if (gator.CliqueId.HasValue)
+        {
+            var myClique = _gameState.Cliques.FirstOrDefault(c => c.Id == gator.CliqueId.Value);
+            if (myClique is not null)
+            {
+                rivalCliqueAccusing = myClique.RivalCliqueIds
+                    .SelectMany(rid => _gameState.Cliques
+                        .Where(c => c.Id == rid)
+                        .SelectMany(c => c.MemberIds))
+                    .Select(rid => _gameState.Alligators.FirstOrDefault(a => a.Id == rid))
+                    .Where(a => a is not null)
+                    .Cast<Alligator>()
+                    .Any(rival => rival.Suspicion.GetValueOrDefault(gator.Id, 0) > 35);
+            }
+        }
+
+        bool cliqueBetrayalVote = clique is not null &&
+            mem.Any(m => m.Type == "voted_against" &&
+                m.Day == _gameState.DayNumber &&
+                m.RelatedAlligatorId.HasValue &&
+                clique.MemberIds.Contains(m.RelatedAlligatorId.Value));
+
+        return new EvaluationContext
+        {
+            VotesAgainstSelf           = votesAgainst,
+            IsVoteLeader               = isVoteLeader,
+            BestAllyDiedThisNight      = bestAllyDiedThisNight,
+            HighRelationGatorVotedAgainstMe = mem.Any(m =>
+                m.Type == "voted_against" &&
+                m.RelatedAlligatorId.HasValue &&
+                gator.Relations.GetValueOrDefault(m.RelatedAlligatorId.Value, 0) >= 50),
+            CloseFriendDied            = closeFriendDied,
+            FriendDeathDay             = lastAllyDeathDay,
+            OverheardSelfAsSuspect     = overheardSelf,
+            TimesVotedAgainst          = timesVotedAgainst,
+            WasExecutedThisDay         = false, // can't know yet at eval time
+            AllAlliesDead              = allAlliesDead,
+            DaysObsessedWithSameSuspect = obsessionDays,
+            LastVoteTargetWasInnocent  = false, // would require post-execution feedback
+            JustHadPositiveConversation = justHadPositiveConversation,
+            DisagreedWithLastVoteOutcome = false,
+            ContradictedSelf           = false,
+            MurderCountThisGame        = murderCount,
+            MissedKeyEventsLastNight   = mem.Count(m => m.Day == _gameState.DayNumber - 1) < 2,
+            VotedWithMajorityLastRound = false,
+            MurderHappenedNearby       = murderNearby,
+            LastMurderDay              = _gameState.DayNumber,
+            AlliesDeadThisGame         = deadAllies.Count,
+            LastAllyDeathDay           = lastAllyDeathDay,
+            // Panic escalation
+            DeathCount                 = dead.Count,
+            // Clique
+            CliqueMateKilledThisNight  = cliqueMateKilledThisNight,
+            RivalCliqueActivelyAccusing = rivalCliqueAccusing,
+            CliqueMateBetrayedVote     = cliqueBetrayalVote,
+        };
+    }
 
     /// <summary>
     /// Creates a deterministic but varied <see cref="Random"/> instance per
@@ -279,4 +463,6 @@ public class GatorBrainService
     /// </summary>
     private static Random MakeRng(int gatorId, int day, string dialogType) =>
         new(gatorId * 31 + day * 997 + (dialogType?.GetHashCode() ?? 0));
+
+    public void Dispose() => _neural.Dispose();
 }

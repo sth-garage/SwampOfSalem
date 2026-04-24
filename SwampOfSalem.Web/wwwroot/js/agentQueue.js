@@ -397,13 +397,20 @@ function _renderNightGatorList(entries) {
 
     listEl.innerHTML = alive.map(p => {
         const entry = entries.find(e => e.alligatorId === p.id);
-        const suspectName = entry?.topSuspectName ?? '—';
         const isMurderer = p.id === state.murdererId;
         const murdererClass = isMurderer ? ' nr-murderer' : '';
         const murdererBadge = isMurderer ? `<span class="nr-murderer-badge">☠ Murderer</span>` : '';
+        let statusHtml;
+        if (isMurderer) {
+            const targetName = p.plannedKillTarget?.name ?? state.gators.find(q => q.id === state.nightVictimId)?.name ?? '—';
+            statusHtml = `<span class="nr-gator-suspect nr-kill-target">target: <strong>${targetName}</strong></span>`;
+        } else {
+            const suspectName = entry?.topSuspectName ?? '—';
+            statusHtml = `<span class="nr-gator-suspect">suspects <strong>${suspectName}</strong></span>`;
+        }
         return `<div class="nr-gator-row${murdererClass}" data-id="${p.id}">
             <span class="nr-gator-name">${p.name}${murdererBadge}</span>
-            <span class="nr-gator-suspect">suspects <strong>${suspectName}</strong></span>
+            ${statusHtml}
         </div>`;
     }).join('');
 
@@ -471,7 +478,17 @@ function _showNightGatorDetail(g, entry) {
 
     // ── Night AI suspect report
     let reportHtml = '';
-    if (entry) {
+    const isMurdererDetail = g.id === state.murdererId;
+    if (isMurdererDetail) {
+        const targetName = g.plannedKillTarget?.name ?? state.gators.find(q => q.id === state.nightVictimId)?.name ?? '—';
+        const killReason = g.plannedKillReason ?? '';
+        reportHtml = `<div class="nr-report-block nr-kill-block">
+            <div class="nr-report-label">🗡 Kill Decision</div>
+            <div class="nr-report-suspect">Target tonight: <strong>${targetName}</strong></div>
+            ${killReason ? `<div class="nr-report-reason">${killReason}</div>` : ''}
+            ${entry?.innerThought ? `<div class="nr-report-thought">💭 "${entry.innerThought}"</div>` : ''}
+        </div>`;
+    } else if (entry) {
         reportHtml = `<div class="nr-report-block">
             <div class="nr-report-label">🌙 Night Reflection</div>
             ${entry.topSuspectName
@@ -506,107 +523,159 @@ function _showNightGatorDetail(g, entry) {
 // ── Debate speech request ─────────────────────────────────────
 
 /**
- * Requests one AI-generated debate speech for the floor-holder.
+ * Generates a scripted debate speech for a gator.
+ * Always uses JS phrase banks — no AI call for debates (too slow for rapid-fire exchange).
  *
- * CONTEXT PASSED TO THE AI:
- *   - The victim's name (who was murdered last night).
- *   - The full transcript of what has been said so far this debate round
- *     (max last 10 lines to keep the prompt concise).
- *   - The speaker's current top suspect and their suspicion score.
- *   - A memory of any past-debate accusations involving this speaker.
- *
- * The speaker's buffered memories (which include past-debate accusation entries)
- * are flushed to the server before the call so the AI's ChatHistory is current.
- *
- * @param {object} speaker        - The gator object currently holding the floor.
- * @param {object|null} suspect   - The gator the speaker most suspects, or null.
- * @param {object|null} victim    - The gator killed last night, or null.
- * @returns {Promise<string>} The spoken debate line, or a scripted fallback on error.
+ * @param {object}      speaker   - Person making the speech.
+ * @param {object|null} suspect   - Who they are accusing, or null.
+ * @param {object|null} victim    - Last night's murder victim, or null.
+ * @param {boolean}     isDefense - True when this is a forced defense response.
+ * @param {object|null} accuser   - Who accused the speaker (for defense mode).
+ * @returns {Promise<string>} The spoken debate line.
  */
-export async function requestDebateSpeech(speaker, suspect, victim) {
-    if (!isAgentAvailable()) return _debateFallback(speaker, suspect);
+export function requestDebateSpeech(speaker, suspect, victim, isDefense = false, accuser = null) {
+    return Promise.resolve(_buildDebateLine(speaker, suspect, victim, isDefense, accuser));
+}
 
-    // Flush this speaker's memories so the AI has up-to-date accusation history
-    const entries = _memoryBuffer.get(speaker.id);
-    if (entries && entries.length > 0) {
-        _memoryBuffer.delete(speaker.id);
-        await flushMemories(speaker.id, entries);
+// ── Debate phrase banks ───────────────────────────────────────
+
+const _ACCUSE_DIRECT = [
+    (s, v) => `I've been watching ${s.name} closely and something is deeply wrong. They're the murderer — I'd bet my life on it.`,
+    (s, v) => `Think about it — who was acting strange before ${v?.name ?? 'the victim'} turned up dead? ${s.name}. It's always been ${s.name}.`,
+    (s, v) => `${s.name} had every reason to want ${v?.name ?? 'someone'} gone. Open your eyes, everyone!`,
+    (s, v) => `I didn't want to say it, but I can't stay quiet. ${s.name} is the one doing this.`,
+    (s, v) => `The evidence keeps pointing back to ${s.name}. We need to vote them out before anyone else dies.`,
+    (s, v) => `${s.name} barely reacted when ${v?.name ?? 'the victim'} was found. That kind of calm is suspicious.`,
+    (s, v) => `I heard ${s.name} say something strange the other day — I didn't think much of it then, but now? They're guilty.`,
+    (s, v) => `Every time I look at ${s.name}, I feel like they know more than they're letting on. They're the killer.`,
+    (s, v) => `If we let ${s.name} walk free and someone else dies tonight, that blood is on our hands. Vote them out!`,
+    (s, v) => `${s.name} was the last one I saw near ${v?.name ?? 'the victim'}. Draw your own conclusions.`,
+    (s, v) => `I've watched enough to know a guilty face — ${s.name} has one.`,
+    (s, v) => `${s.name} keeps deflecting blame onto others. Classic murderer behavior. I'm not fooled.`,
+    (s, v) => `We've all been too polite to say it out loud. But I'll say it: ${s.name} is the murderer.`,
+    (s, v) => `I can't prove it yet, but my gut has never been wrong. ${s.name} did this.`,
+    (s, v) => `${s.name}'s story doesn't add up. Too many convenient explanations. They're lying to us.`,
+    (s, v) => `Why is ${s.name} so calm right now? Someone innocent would be terrified. They're not.`,
+    (s, v) => `I lay awake last night putting the pieces together. It all leads to ${s.name}.`,
+    (s, v) => `${s.name} tried to throw suspicion elsewhere earlier. That's exactly what a guilty person does.`,
+    (s, v) => `We're running out of time. I'm calling it — ${s.name} is the murderer. Vote with me.`,
+    (s, v) => `Something about ${s.name} has always felt off. After ${v?.name ?? 'what happened'}, I'm sure of it now.`,
+    (s, v) => `${s.name} was way too quick to accuse someone else. Guilty people love pointing fingers.`,
+    (s, v) => `I saw ${s.name} whispering privately before the murder. Secret conversations lead to dead gators.`,
+    (s, v) => `${s.name} has been acting like they already know what happened. They do — because they did it.`,
+    (s, v) => `Look at how ${s.name} reacted to every piece of news today. That's not grief — that's performance.`,
+    (s, v) => `${s.name} is smart enough to blend in, but not smart enough to fool all of us. I see you, ${s.name}.`,
+];
+
+const _ACCUSE_CLIQUE = [
+    (s, members) => `I don't trust ${s.name} — and honestly I don't trust anyone they've been hanging around with. That whole group — ${members} — looks out for each other too much.`,
+    (s, members) => `${s.name} didn't act alone. Look at who they spend all their time with. ${members} — they're all in on it or covering it up.`,
+    (s, members) => `It's not just ${s.name}. That little circle of ${members} has been awfully cozy lately. Suspicious timing.`,
+    (s, members) => `${s.name} is the one I'm pointing at, but their crew — ${members} — haven't exactly been helpful either.`,
+    (s, members) => `You know what bothers me? ${s.name} always has backup. ${members} follow them around like they've got something to protect.`,
+    (s, members) => `${s.name} keeps company with ${members}. Murderers don't operate in a vacuum — watch them all.`,
+    (s, members) => `I'm pointing at ${s.name}, but their clique — ${members} — should all be watched carefully.`,
+    (s, members) => `${members} and ${s.name} have been inseparable. That kind of loyalty makes me nervous right now.`,
+    (s, members) => `Ever notice how ${s.name} always ends up near ${members}? Something is going on in that group.`,
+    (s, members) => `${s.name} has allies — ${members}. They'll vote to protect each other. Don't let them.`,
+    (s, members) => `That whole faction — ${s.name}, ${members} — acts like they know something the rest of us don't.`,
+    (s, members) => `I wouldn't put it past ${s.name} to use ${members} as cover. They're too tight-knit to be innocent.`,
+    (s, members) => `${s.name} and ${members} have been whispering together since before the murder. I don't like it.`,
+    (s, members) => `You protect ${s.name}, you protect every secret that group has been keeping. ${members} — all of you.`,
+];
+
+const _DEFEND_DIRECT = [
+    (acc) => `${acc?.name ?? 'You'} are wrong about me. I had nothing to do with any of this and I resent the accusation.`,
+    (acc) => `${acc?.name ?? 'Someone'} is pointing fingers at me because they're scared. I'm innocent.`,
+    (acc) => `I've done nothing wrong! ${acc?.name ?? 'This accusation'} is misdirection — look at who's REALLY acting guilty.`,
+    (acc) => `You want to talk suspicious? ${acc?.name ?? 'My accuser'} was the one acting strange. Not me.`,
+    (acc) => `I won't stand here and be accused without fighting back. I'm innocent and everyone here knows it.`,
+    (acc) => `${acc?.name ?? 'Whoever'} just accused me is either wrong or deliberately trying to frame me. Think about that.`,
+    (acc) => `If I were the murderer, do you think I'd be standing here defending myself this openly? This is ridiculous.`,
+    (acc) => `${acc?.name ?? 'My accuser'} has no evidence. They're guessing — and the wrong guess gets an innocent gator killed.`,
+    (acc) => `I've been nothing but honest with all of you. This accusation is a gift to whoever the real killer is.`,
+    (acc) => `Why would I kill anyone? ${acc?.name ?? 'Think about the logic'} — there's no motive, no proof, nothing.`,
+    (acc) => `I understand the fear, but channeling it at me is a mistake. The real murderer is watching us point at the wrong gator.`,
+    (acc) => `${acc?.name ?? 'This accusation'} is exactly what the murderer wants — us fighting each other instead of finding the truth.`,
+    (acc) => `I dare ${acc?.name ?? 'my accuser'} to name ONE piece of real evidence. Because there isn't any.`,
+    (acc) => `Check your suspicion levels, everyone. I'm being accused because ${acc?.name ?? 'someone'} needs a scapegoat.`,
+    (acc) => `I may not be liked by everyone here, but that doesn't make me a killer. I'm innocent.`,
+    (acc) => `${acc?.name ?? 'Whoever'} just accused me should look in the mirror first.`,
+    (acc) => `You're burning an innocent gator if you vote for me. Is that really a risk you're willing to take?`,
+    (acc) => `I have nothing to hide. Ask anyone — I did nothing.`,
+    (acc) => `${acc?.name ?? 'Someone'} wants you looking at me so you don't look at them. Classic deflection.`,
+    (acc) => `I've mourned every death in this swamp. The murderer doesn't feel that. I do.`,
+    (acc) => `Vote for me if you want, but when another gator turns up dead tomorrow you'll know you made a mistake.`,
+    (acc) => `${acc?.name ?? 'That accusation'} is built on nothing but paranoia. I won't let fear decide this vote.`,
+    (acc) => `Everyone here should be asking why ${acc?.name ?? 'my accuser'} is so eager to put the spotlight on me.`,
+    (acc) => `I didn't sleep last night — not because I'm guilty, but because I'm terrified of the real killer. That's the truth.`,
+    (acc) => `${acc?.name ?? 'My accuser'} is smart — they know if they get you focused on me, you'll stop looking elsewhere.`,
+];
+
+const _DEFEND_CLIQUE = [
+    (acc, members) => `Now you're blaming my whole group? ${members} are my friends, not conspirators. Leave them out of this.`,
+    (acc, members) => `My friendship with ${members} has nothing to do with a murder. Don't drag them into this witch hunt.`,
+    (acc, members) => `So now having close friends is suspicious? ${members} and I just get along. That's not a crime.`,
+    (acc, members) => `${acc?.name ?? 'Someone'} is trying to isolate me from ${members} so I have no one to defend me. Not happening.`,
+    (acc, members) => `Leave ${members} out of this. If you have a problem, bring it to me directly.`,
+    (acc, members) => `Attacking my whole circle? ${members} are innocent. This is nothing but a smear campaign.`,
+    (acc, members) => `We spend time together because we trust each other — not because we're hiding something. ${members} are good gators.`,
+];
+
+const _UNCERTAIN = [
+    (v) => `I don't have a clear suspect yet. But someone in this swamp knows what happened to ${v?.name ?? 'our neighbor'} and they'd better start talking.`,
+    (v) => `I keep going back and forth — everyone seems guilty and no one does. I need more time to think.`,
+    (v) => `I'm not ready to name a name. Whoever I accuse, I want to be sure. A wrong accusation costs someone their life.`,
+    (v) => `Honestly? I don't know. But I'm watching everyone very carefully.`,
+    (v) => `The murderer is clever. They haven't slipped up yet — or they have and I've missed it. I'm still piecing it together.`,
+    (v) => `Everyone here has a reason to be suspicious. I just need one more piece of evidence.`,
+    (v) => `I've been listening to everything said in this debate, and I'm still not sure. The killer is good at hiding.`,
+    (v) => `No accusation from me yet. But if someone acts out of character in the next few minutes — I'll remember it.`,
+    (v) => `I feel like the answer is right in front of us and we keep looking past it.`,
+    (v) => `${v?.name ?? 'Our neighbor'} deserves justice. I just don't want to give that justice to the wrong gator.`,
+    (v) => `I have my suspicions, but I'm not certain enough to destroy someone's life over a hunch.`,
+    (v) => `Every face I look at, I wonder. That's what a murderer does to a community — makes you doubt everyone.`,
+];
+
+export function buildDebateLine(speaker, suspect, victim, isDefense, accuser) {
+    return _buildDebateLine(speaker, suspect, victim, isDefense, accuser);
+}
+
+function _buildDebateLine(speaker, suspect, victim, isDefense, accuser) {
+    if (isDefense) {
+        const speakerClique = (state.cliques ?? []).find(c => c.memberIds?.includes(speaker.id));
+        const cliqueFriends = speakerClique
+            ? speakerClique.memberIds.filter(id => id !== speaker.id && !state.deadIds.has(id))
+            : [];
+        if (cliqueFriends.length > 0 && Math.random() < 0.35) {
+            const members = cliqueFriends.map(id => state.gators.find(p => p.id === id)?.name ?? '?').join(', ');
+            const pool = _DEFEND_CLIQUE;
+            return pool[Math.floor(Math.random() * pool.length)](accuser, members);
+        }
+        const pool = _DEFEND_DIRECT;
+        return pool[Math.floor(Math.random() * pool.length)](accuser);
     }
 
-    // Build the debate context string
-    const victimLine = victim ? `${victim.name} was murdered last night.` : 'Someone was murdered last night.';
-
-    // Include the last 10 transcript entries so the AI can react to what's been said
-    const recentLines = (state.debateTranscript ?? []).slice(-10)
-        .map(e => `${e.speakerName}: "${e.message}"`)
-        .join('\n');
-
-    const suspectLine = suspect
-        ? `Your top suspect is ${suspect.name} (suspicion: ${Math.round(speaker.suspicion?.[suspect.id] ?? 0)}/100).`
-        : 'You have no strong suspect yet.';
-
-    // Build cross-day accusation history relevant to this speaker
-    const debateHist = state.debateHistory ?? [];
-    const relevantHistory = debateHist.slice(-20); // cap to last 20 entries
-    let historySection = '';
-    if (relevantHistory.length > 0) {
-        const lines = relevantHistory.map(e => {
-            if (e.type === 'accused') return `Day ${e.day}: ${e.accuserName} accused ${e.targetName}: "${e.quote}"`;
-            if (e.type === 'defended') return `Day ${e.day}: ${e.accuserName} defended themselves: "${e.quote}"`;
-            return null;
-        }).filter(Boolean);
-        if (lines.length > 0) historySection = `PAST DEBATE HISTORY (use as evidence):\n${lines.join('\n')}`;
+    if (!suspect) {
+        const pool = _UNCERTAIN;
+        return pool[Math.floor(Math.random() * pool.length)](victim);
     }
 
-    // Pull the speaker's recent chat log as potential evidence
-    const chatEvidence = (speaker.chatLog ?? [])
-        .filter(e => e.message && e.message.length > 0)
-        .slice(-8)
-        .map(e => {
-            const fromName = state.gators.find(p => p.id === e.from)?.name ?? '?';
-            const toName   = state.gators.find(p => p.id === e.to)?.name ?? '?';
-            return `Day ${e.day ?? state.dayNumber}: ${fromName} said to ${toName}: "${e.message}"`;
-        })
-        .join('\n');
-    const evidenceSection = chatEvidence.length > 0
-        ? `THINGS YOU WITNESSED OR HEARD:\n${chatEvidence}`
-        : '';
-
-    const reasonInstruction = suspect
-        ? `You believe ${suspect.name} is the murderer. Give a SPECIFIC reason — reference something you saw, heard, or something said in this debate. For example: "It's ${suspect.name} because I heard them say [something suspicious] to [someone]" or "I saw ${suspect.name} acting strange near the victim" or "${suspect.name} was quick to blame [someone else] to throw us off." You MUST give a reason — do NOT just say "vote for them."`
-        : `You have no clear suspect. React to what others have said or express suspicion of someone based on their specific behaviour or words you have witnessed.`;
-
-    const context = [
-        victimLine,
-        `DEBATE SO FAR:\n${recentLines || '(No one has spoken yet.)'}`,
-        historySection,
-        evidenceSection,
-        suspectLine,
-        reasonInstruction,
-    ].filter(s => s.length > 0).join('\n\n');
-
-    try {
-        const result = await getAgentDialog(speaker.id, 'debate', null, context);
-        return result?.spoken || _debateFallback(speaker, suspect);
-    } catch (e) {
-        console.warn('[debate] AI call failed, using fallback:', e);
-        return _debateFallback(speaker, suspect);
+    const suspectClique = (state.cliques ?? []).find(c => c.memberIds?.includes(suspect.id));
+    const cliquePeers = suspectClique
+        ? suspectClique.memberIds.filter(id => id !== suspect.id && !state.deadIds.has(id))
+        : [];
+    if (cliquePeers.length > 0 && Math.random() < 0.30) {
+        const members = cliquePeers.map(id => state.gators.find(p => p.id === id)?.name ?? '?').join(', ');
+        const pool = _ACCUSE_CLIQUE;
+        return pool[Math.floor(Math.random() * pool.length)](suspect, members);
     }
+
+    const pool = _ACCUSE_DIRECT;
+    return pool[Math.floor(Math.random() * pool.length)](suspect, victim);
 }
 
 function _debateFallback(speaker, suspect) {
-    if (suspect) {
-        return [
-            `Everyone, vote for ${suspect.name}!`,
-            `I'm convinced it's ${suspect.name} — vote them out!`,
-            `${suspect.name} is guilty. We need to act now.`,
-        ][Math.floor(Math.random() * 3)];
-    }
-    return [
-        `I didn't do it — don't vote for me!`,
-        `It wasn't me! Look elsewhere.`,
-        `Vote for someone else — I'm innocent!`,
-    ][Math.floor(Math.random() * 3)];
+    return _buildDebateLine(speaker, suspect, null, false, null);
 }
-
 

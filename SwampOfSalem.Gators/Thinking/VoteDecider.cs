@@ -37,6 +37,15 @@ public static class VoteDecider
         if (voter.IsMurderer)
             return MurdererVote(voter, candidates, gameState, rng);
 
+        // Persuasion-immune moods lock in top suspicion target regardless of scoring
+        if (MoodPhraseBanks.IsPersuasionImmune(voter.Mood))
+        {
+            var lockedTarget = candidates
+                .OrderByDescending(c => voter.Suspicion.GetValueOrDefault(c.Id, 0))
+                .First();
+            return (lockedTarget.Id, BuildReason(voter, lockedTarget, gameState, rng));
+        }
+
         // Score each candidate
         var scored = candidates
             .Select(c => (Candidate: c, Score: ComputeScore(voter, c, gameState)))
@@ -59,36 +68,110 @@ public static class VoteDecider
         double relation = voter.Relations.GetValueOrDefault(candidate.Id, 0);
         score -= relation * 0.3;
 
+        // Mood modifiers (applied before personality)
+        score = ApplyMoodScoreModifier(voter, candidate, score);
+
+        // ── Clique modifiers ──────────────────────────────────────────────────
+
+        // Clique loyalty: strongly resist voting for a clique-mate
+        if (CliqueService.SameClique(voter, candidate))
+            score *= 0.15;
+
+        // Rival clique penalty: more willing to vote out rival clique members
+        if (CliqueService.AreRivals(voter, candidate, gameState))
+            score += 20;
+
+        // Clique consensus: if most clique-mates also suspect this candidate, amplify
+        double consensus = CliqueService.CliqueCandidateConsensus(voter, candidate.Id, gameState);
+        if (consensus >= 0.5)
+            score += 15 * consensus;
+
+        // ── Fear multiplier: scales with fraction of population dead ─────────
+
+        int totalStarting = gameState.StartingPopulation > 0
+            ? gameState.StartingPopulation
+            : Math.Max(gameState.Alligators.Count, 1);
+        int deathCount = gameState.DeadIds.Count;
+        double deathFrac = (double)deathCount / totalStarting;
+
+        // Each 10 % of population dead adds 5 % to suspicion weight (max +50 %)
+        double fearMultiplier = 1.0 + Math.Min(deathFrac * 5.0, 0.5);
+        score *= fearMultiplier;
+
         // Personality modifiers
         switch (voter.Personality)
         {
             case Personality.Grumpy:
-                // Grumpy gators are conviction-heavy: suspicion matters more
                 score *= 1.2;
                 break;
             case Personality.Cheerful:
-                // Cheerful gators give benefit of the doubt to friends
                 if (relation > 40) score *= 0.6;
                 break;
             case Personality.Energetic:
-                // Energetic gators follow the crowd — boost score for whoever has highest existing vote count
-                // (approximated by having the most memories talking about that candidate as suspect)
                 break;
             case Personality.Lazy:
-                // Lazy gators add some randomness — they may not have been paying attention
-                // (randomness is applied at vote selection time where rng is available)
                 break;
             case Personality.Introvert:
-                // Introspective: highest analytical weight on suspicion
                 score *= 1.3;
                 break;
             case Personality.Extrovert:
-                // Extroverts use relationship warmth; they rarely vote for friends
                 if (relation > 50) score *= 0.5;
                 break;
         }
 
         return score;
+    }
+
+    private static double ApplyMoodScoreModifier(Alligator voter, Alligator candidate, double score)
+    {
+        return voter.Mood switch
+        {
+            // Obsessed / Convinced / LastStand — massively up-weight top-suspicion target
+            Mood.Obsessed or Mood.Convinced or Mood.LastStand
+                => voter.Suspicion.GetValueOrDefault(candidate.Id, 0) >= 50 ? score * 2.0 : score * 0.4,
+
+            // Doubting — reduce score across the board (uncertain)
+            Mood.Doubting => score * 0.6,
+
+            // Sleuthing — weight all candidates more evenly
+            Mood.Sleuthing => score * 0.8,
+
+            // Conflicted — halve score for the candidate they're closest to
+            Mood.Conflicted
+                => voter.Relations.GetValueOrDefault(candidate.Id, 0) >= 50 ? score * 0.3 : score,
+
+            // Betrayed — boost the candidate who voted against them
+            Mood.Betrayed => score * 1.4,
+
+            // Bonded — never effectively vote for a max-relation gator
+            Mood.Bonded
+                => voter.Relations.GetValueOrDefault(candidate.Id, 0) >= 70 ? score * 0.1 : score,
+
+            // Cornered / Desperate — shift weight toward whoever the murderer wants
+            // (for non-murderer: boost any non-self candidate)
+            Mood.Cornered or Mood.Desperate => score * 1.1,
+
+            // Panicking — voting is erratic: add noise
+            Mood.Panicking => score + (candidate.Id % 3) * 5.0,
+
+            // Resigned / CheckedOut — low commitment; slightly reduce all weights
+            Mood.Resigned or Mood.CheckedOut => score * 0.7,
+
+            // Ranting — boost whoever they already have highest suspicion on
+            Mood.Ranting
+                => voter.Suspicion.GetValueOrDefault(candidate.Id, 0) > 40 ? score * 1.5 : score,
+
+            // Murky — flatten scores significantly
+            Mood.Murky => score * 0.5,
+
+            // SurvivorsGuilt — boost suspicion weight strongly
+            Mood.SurvivorsGuilt => score * 1.3,
+
+            // Doomed (murderer) — chaos; randomise
+            Mood.Doomed => score + (candidate.GetHashCode() % 20),
+
+            _ => score,
+        };
     }
 
     private static (int VoteForId, string Reason) MurdererVote(
@@ -156,6 +239,14 @@ public static class VoteDecider
 
     private static string BuildReason(Alligator voter, Alligator candidate, GameState gameState, Random rng)
     {
+        // Check for mood-specific vote overlay first
+        var moodOverlay = MoodPhraseBanks.GetConversation(voter.Mood);
+        if (moodOverlay.Length > 0 && rng.Next(3) < 2) // 66 % chance to use mood phrasing
+        {
+            var moodRaw = ThoughtEngine.Pick(moodOverlay, rng);
+            return ThoughtEngine.Substitute(moodRaw, voter.Name, candidate.Name, candidate.Name, null, candidate.Name);
+        }
+
         var arr = _voteReasons.GetValueOrDefault(voter.Personality,
             ["{target}. That's my vote."]);
         var raw = ThoughtEngine.Pick(arr, rng);

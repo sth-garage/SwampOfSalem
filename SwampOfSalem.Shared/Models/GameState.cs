@@ -91,4 +91,16 @@ public class GameState
     /// Reset at the start of each new Vote phase by <c>VoteService.EstablishVoteOrder()</c>.
     /// </summary>
     public Dictionary<int, int> VoteResults { get; set; } = [];
+
+    /// <summary>
+    /// All active cliques formed during this game session.
+    /// Managed by <c>CliqueService</c> — formed at game start and updated after each death.
+    /// </summary>
+    public List<Clique> Cliques { get; set; } = [];
+
+    /// <summary>
+    /// Number of alligators alive at the start of the game.
+    /// Used by panic-escalation logic to compute the fraction of the population that has died.
+    /// </summary>
+    public int StartingPopulation { get; set; }
 }

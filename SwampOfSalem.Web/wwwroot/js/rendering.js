@@ -388,14 +388,13 @@ function _renderPanel(p) {
             </div>`;
         }).join('');
 
-    // Top suspect
-    const suspEntries = living()
-        .filter(q => q.id !== p.id)
-        .map(q => ({ q, s: p.suspicion[q.id] ?? 0 }))
-        .sort((a, b) => b.s - a.s);
-    const topSuspect = suspEntries.length > 0 && suspEntries[0].s > 15
-        ? `<div class="panel-suspect">\uD83D\uDD75\uFE0F Suspects <strong>${suspEntries[0].q.name}</strong> (${Math.round(suspEntries[0].s)}%)</div>`
-        : '';
+    // Intent: who they've decided to kill / vote for, and why
+    let intentBlock = '';
+    if (isMurderer && p.plannedKillTarget && !state.deadIds.has(p.plannedKillTarget.id)) {
+        intentBlock = `<div class="panel-intent panel-intent-kill">\uD83D\uDD2A Intends to kill <strong>${p.plannedKillTarget.name}</strong><div class="panel-intent-reason">${p.plannedKillReason ?? ''}</div></div>`;
+    } else if (!isMurderer && p.plannedVoteTarget && !state.deadIds.has(p.plannedVoteTarget.id)) {
+        intentBlock = `<div class="panel-intent panel-intent-vote">\uD83D\uDDF3\uFE0F Intends to vote for <strong>${p.plannedVoteTarget.name}</strong><div class="panel-intent-reason">${p.plannedVoteReason ?? ''}</div></div>`;
+    }
 
     // Vote history
     const myVotes = (state.voteHistory || []).filter(v => v.voterId === p.id);
@@ -478,7 +477,7 @@ function _renderPanel(p) {
             `<div class="panel-stat-row">💭 Thought ${statBar(p.thoughtStat)} <span>${p.thoughtStat}/10</span></div>` +
         `</div>` +
         `<div class="panel-divider"></div>` +
-        topSuspect + votedStr +
+        intentBlock + votedStr +
         `<div class="panel-divider"></div>` +
         `<div class="panel-section-title">\uD83E\uDD1D Relations</div>` +
         `<div class="panel-relations">${relRows}</div>` +

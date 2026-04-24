@@ -600,6 +600,11 @@ button.secondary:hover { background: rgba(30, 65, 28, 0.85); }
 }
 
 .panel-suspect { font-size: .8rem; color: #ff8888; margin: .15rem 0; }
+.panel-intent  { font-size: .82rem; margin: .25rem 0; padding: .25rem .4rem; border-radius: 4px; }
+.panel-intent-kill { background: rgba(200,40,40,.15); color: #ff8888; border-left: 2px solid #c83030; }
+.panel-intent-vote { background: rgba(80,140,200,.15); color: #88b8e8; border-left: 2px solid #4080c0; }
+.panel-intent strong { color: #fff; }
+.panel-intent-reason { font-size: .76rem; margin-top: .2rem; opacity: .8; font-style: italic; }
 .panel-votes   { font-size: .78rem; color: #98a880; opacity: .85; }
 .panel-theft   { font-size: .76rem; color: #ff9880; margin: .1rem 0; }
 
@@ -1018,6 +1023,10 @@ button.secondary:hover { background: rgba(30, 65, 28, 0.85); }
     border-left: 3px solid rgba(80,180,60,.25);
     padding-left: .6rem; margin-top: .15rem;
 }
+.nr-kill-target { color: #ff9090; }
+.nr-kill-target strong { color: #ff4444; }
+.nr-kill-block .nr-report-label { color: #cc4444; }
+.nr-kill-block .nr-report-suspect strong { color: #ff4444; }
 
 .nr-conv-list {
     display: flex; flex-direction: column; gap: 3px;

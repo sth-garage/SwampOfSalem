@@ -1,4 +1,5 @@
 using SwampOfSalem.Gators.Phrases;
+using SwampOfSalem.Shared.Enums;
 using SwampOfSalem.Shared.Models;
 
 namespace SwampOfSalem.Gators.Thinking;
@@ -26,13 +27,27 @@ public static class ThoughtEngine
         if (gator.IsMurderer)
             return GenerateMurdererThought(gator, gameState, rng, targetId);
 
-        string target = ResolveTarget(gator, gameState, targetId);
-        string suspect = ResolveSuspect(gator, gameState);
+        // Mood overlay: use mood-specific thought when available (~50 % chance)
+        if (gator.Mood != Mood.Normal)
+        {
+            var moodPhrases = MoodPhraseBanks.GetThought(gator.Mood);
+            if (moodPhrases.Length > 0 && rng.Next(2) == 0)
+            {
+                string target = ResolveTarget(gator, gameState, targetId);
+                string suspect = ResolveSuspect(gator, gameState);
+                string victimName = ResolveVictimName(gameState);
+                var raw = Pick(moodPhrases, rng);
+                return Substitute(raw, gator.Name, target, suspect, victimName, null);
+            }
+        }
+
+        string targetFinal = ResolveTarget(gator, gameState, targetId);
+        string suspectFinal = ResolveSuspect(gator, gameState);
         string tier = ResolveTier(gator, targetId, gameState);
 
         var phrases = PhraseBanks.Get(gator.Personality, PhraseBanks.Thought, tier);
-        var raw = Pick(phrases, rng);
-        return Substitute(raw, gator.Name, target, suspect, null, null);
+        var rawLine = Pick(phrases, rng);
+        return Substitute(rawLine, gator.Name, targetFinal, suspectFinal, null, null);
     }
 
     /// <summary>
@@ -44,6 +59,17 @@ public static class ThoughtEngine
         {
             var killPhrases = MurdererPhrases.DawnAfterKill[gator.Personality];
             return Substitute(Pick(killPhrases, rng), gator.Name, null, null, victimName, null);
+        }
+
+        // Mood overlay for dawn thoughts
+        if (gator.Mood != Mood.Normal)
+        {
+            var moodPhrases = MoodPhraseBanks.GetThought(gator.Mood);
+            if (moodPhrases.Length > 0 && rng.Next(2) == 0)
+            {
+                var raw = Pick(moodPhrases, rng);
+                return Substitute(raw, gator.Name, null, ResolveSuspect(gator, gameState), victimName, null);
+            }
         }
 
         var phrases = PhraseBanks.Get(gator.Personality, PhraseBanks.DawnThought, "neutral");
@@ -111,6 +137,11 @@ public static class ThoughtEngine
         if (targetId is null) return "neutral";
         double rel = gator.Relations.GetValueOrDefault(targetId.Value, 0);
         return PhraseBanks.RelationTier(rel);
+    }
+
+    private static string ResolveVictimName(GameState gameState)
+    {
+        return gameState.Alligators.FirstOrDefault(a => !a.IsAlive)?.Name ?? "them";
     }
 
     internal static string Pick(string[] arr, Random rng) =>

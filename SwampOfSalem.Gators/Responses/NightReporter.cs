@@ -1,5 +1,7 @@
+using SwampOfSalem.Gators.Phrases;
 using SwampOfSalem.Gators.Thinking;
 using SwampOfSalem.Shared.DTOs;
+using SwampOfSalem.Shared.Enums;
 using SwampOfSalem.Shared.Models;
 
 namespace SwampOfSalem.Gators.Responses;
@@ -34,6 +36,19 @@ public static class NightReporter
             string? suspectName = suspectId.HasValue
                 ? gameState.Alligators.FirstOrDefault(a => a.Id == suspectId.Value)?.Name
                 : null;
+
+            // Prepend mood flavour to reason when an active mood produces relevant phrasing
+            if (gator.Mood != Mood.Normal)
+            {
+                var moodThoughtPhrases = MoodPhraseBanks.GetThought(gator.Mood);
+                if (moodThoughtPhrases.Length > 0 && rng.Next(2) == 0)
+                {
+                    var moodLine = ThoughtEngine.Pick(moodThoughtPhrases, rng);
+                    string victimName = gameState.Alligators.FirstOrDefault(a => !a.IsAlive)?.Name ?? "them";
+                    reason = ThoughtEngine.Substitute(moodLine, gator.Name, suspectName, suspectName, victimName, null)
+                             + " " + reason;
+                }
+            }
 
             // Generate inner thought
             string thought = ThoughtEngine.Generate(gator, gameState, rng, suspectId);

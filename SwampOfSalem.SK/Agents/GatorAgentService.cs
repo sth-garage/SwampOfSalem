@@ -137,8 +137,10 @@ public class GatorAgentService
 
     private ChatCompletionAgent CreateAgent(Alligator gator)
     {
+        var memories = _memories.GetOrAdd(gator.Id, _ => []);
         var systemPrompt = PersonalityPrompts.GetSystemPrompt(
-            gator.Name, gator.Personality, gator.IsMurderer, gator.IsLiar);
+            gator.Name, gator.Personality, gator.IsMurderer, gator.IsLiar,
+            gator.Mood, memories);
 
         var agentKernel = _kernel.Clone();
         agentKernel.Plugins.AddFromObject(new SwampPlugin(
@@ -165,6 +167,7 @@ public class GatorAgentService
     /// Adds a memory to an alligator's in-process memory list <b>and</b> injects it
     /// into the agent's <see cref="ChatHistory"/> as a system message so the agent
     /// can reference it in future responses.
+    /// Also triggers a mood-aware instruction refresh so mood changes mid-game propagate.
     /// </summary>
     /// <param name="alligatorId">ID of the alligator receiving the memory.</param>
     /// <param name="memory">The memory entry to add.</param>
@@ -173,10 +176,46 @@ public class GatorAgentService
         var memories = _memories.GetOrAdd(alligatorId, _ => []);
         memories.Add(memory);
 
-        // Also inject into chat history so the agent "remembers"
+        // Inject into chat history so the agent "remembers"
         if (_histories.TryGetValue(alligatorId, out var history))
         {
             history.AddSystemMessage($"[Memory - Day {memory.Day}] {memory.Detail}");
+        }
+
+        // Refresh agent instructions with latest mood + history on significant events
+        if (memory.Type is "death" or "vote" or "conviction" or "night_report")
+            RefreshAgentMood(alligatorId);
+    }
+
+    /// <summary>
+    /// Rebuilds the SK agent's <c>Instructions</c> string to reflect the gator's
+    /// <b>current</b> <see cref="Mood"/> and the latest slice of memory history.
+    /// Call this whenever mood may have changed (e.g. after a death event, vote, or
+    /// night report) so the LLM's framing stays current without restarting the agent.
+    /// Also injects a system message into the chat history as a visible mood signal.
+    /// </summary>
+    /// <param name="alligatorId">ID of the alligator whose agent to refresh.</param>
+    public void RefreshAgentMood(int alligatorId)
+    {
+        var gator = _gameState.Alligators.FirstOrDefault(a => a.Id == alligatorId);
+        if (gator is null) return;
+        if (!_agents.ContainsKey(alligatorId)) return;
+
+        var memories = _memories.GetOrAdd(alligatorId, _ => []);
+
+        // Rebuild a fresh prompt string to capture mood + recent memories
+        var updatedPrompt = PersonalityPrompts.GetSystemPrompt(
+            gator.Name, gator.Personality, gator.IsMurderer, gator.IsLiar,
+            gator.Mood, memories);
+
+        // Instructions is init-only, so push the refresh as a high-priority system message
+        // into chat history — the model reads this as effectively a new framing instruction
+        if (_histories.TryGetValue(alligatorId, out var history))
+        {
+            history.AddSystemMessage(
+                $"[Mood update — Day {_gameState.DayNumber}] Your emotional state has shifted to: {gator.Mood}. " +
+                $"Let this shape every word you say from this point forward.\n\n" +
+                $"[Updated context]\n{updatedPrompt}");
         }
     }
 
@@ -325,11 +364,16 @@ public class GatorAgentService
             .Select(a => $"{a!.Name} (ID:{a.Id})")
             .ToList();
 
+        var gator = _gameState.Alligators.FirstOrDefault(a => a.Id == request.AlligatorId);
+        var moodLine = gator is not null
+            ? $"Remember: your current mood is {gator.Mood} — let it influence the confidence and tone of your vote."
+            : string.Empty;
+
         var prompt = $"""
             VOTE TIME. You must vote to execute one alligator. 
             Debate summary: {request.DebateSummary}
             Candidates: {string.Join(", ", candidates)}
-            
+            {moodLine}
             Respond with ONLY the ID number of who you vote for, followed by a brief reason.
             Format: ID|reason
             Example: 3|They were acting suspicious near the victim's house
@@ -375,6 +419,12 @@ public class GatorAgentService
         var aliveCount = _gameState.Alligators.Count(a => a.IsAlive);
         var deadCount = _gameState.Alligators.Count(a => !a.IsAlive);
         sb.AppendLine($"[Day {_gameState.DayNumber}, Phase: {_gameState.Phase}, Alive: {aliveCount}, Dead: {deadCount}]");
+
+        // Remind the agent of their current mood every turn so late-game changes take effect
+        if (gator is not null)
+        {
+            sb.AppendLine($"[Your current mood: {gator.Mood}] Let this colour how you speak and reason right now.");
+        }
 
         if (request.TargetAlligatorId.HasValue)
         {
@@ -489,10 +539,15 @@ public class GatorAgentService
         // Use the chat completion service directly for a single structured call
         var chatService = _kernel.GetRequiredService<IChatCompletionService>();
 
+        var iMem = _memories.GetOrAdd(initiator.Id, _ => []);
+        var rMem = _memories.GetOrAdd(responder.Id, _ => []);
+
         var initiatorPrompt = PersonalityPrompts.GetSystemPrompt(
-            initiator.Name, initiator.Personality, initiator.IsMurderer, initiator.IsLiar);
+            initiator.Name, initiator.Personality, initiator.IsMurderer, initiator.IsLiar,
+            initiator.Mood, iMem);
         var responderPrompt = PersonalityPrompts.GetSystemPrompt(
-            responder.Name, responder.Personality, responder.IsMurderer, responder.IsLiar);
+            responder.Name, responder.Personality, responder.IsMurderer, responder.IsLiar,
+            responder.Mood, rMem);
 
         var rel_ir = initiator.Relations.GetValueOrDefault(responder.Id, 0);
         var rel_ri = responder.Relations.GetValueOrDefault(initiator.Id, 0);
@@ -663,19 +718,10 @@ public class GatorAgentService
                 });
 
             var memories = _memories.TryGetValue(id, out var mem) ? mem : [];
-            var memLines = memories.TakeLast(8).Select(m => $"  [{m.Type}] {m.Detail}");
-
-            // Include recent debate accusation history so the agent can reason from it
-            var debateAccusations = memories
-                .Where(m => m.Type is "past_debate_accuse" or "past_debate_accused_me" or "past_debate_overheard")
-                .TakeLast(10)
-                .Select(m => $"  [debate] {m.Detail}");
-            var debateSection = debateAccusations.Any()
-                ? $"\nDebate accusation history (use this to figure out who the murderer is):\n{string.Join("\n", debateAccusations)}"
-                : string.Empty;
 
             var systemPrompt = PersonalityPrompts.GetSystemPrompt(
-                gator.Name, gator.Personality, gator.IsMurderer, gator.IsLiar);
+                gator.Name, gator.Personality, gator.IsMurderer, gator.IsLiar,
+                gator.Mood, memories);
 
             var prompt = $$$"""
                 {{{systemPrompt}}}
@@ -685,11 +731,8 @@ public class GatorAgentService
                 Other alligators you know:
                 {{{string.Join("\n", others)}}}
 
-                Your recent memories:
-                {{{string.Join("\n", memLines)}}}{{{debateSection}}}
-
-                Pay close attention to the debate accusation history — who accused whom, who defended themselves, and what reasons they gave. Use this to reason about who the murderer might be.
                 Based on your memories and feelings, who do you suspect most of being the murderer?
+                Pay close attention to debate accusations, who defended themselves, and what reasons they gave.
                 Respond ONLY with a JSON object in this exact format (no markdown):
                 {{
                   "topSuspectId": <id number or null>,

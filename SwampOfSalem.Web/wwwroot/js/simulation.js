@@ -833,18 +833,18 @@ function gameLoop() {
                         p.indoors = true;
                     }
                 } else {
-                    // Gentle drift within the enclosure bubble
+                    // Face-to-face: host stands on one side of house centre, guest on the other
                     const h = state.houses[p.homeIndex];
-                    const r = 38; // drift radius within enclosure
-                    const dx = p.targetX - p.x, dy = p.targetY - p.y;
-                    const d  = Math.sqrt(dx*dx + dy*dy);
-                    if (d <= p.speed * 0.4) {
-                        p.targetX = h.x + (Math.random() * 2 - 1) * r;
-                        p.targetY = h.y + (Math.random() * 2 - 1) * r;
-                    } else {
-                        p.x += (dx/d) * p.speed * 0.4;
-                        p.y += (dy/d) * p.speed * 0.4;
+                    const faceGap = GATOR_SIZE * 0.9;
+                    const hostTargetX = h.doorX - faceGap;
+                    const hostTargetY = h.doorY - GATOR_SIZE;
+                    const ddx = hostTargetX - p.x, ddy = hostTargetY - p.y;
+                    const dd  = Math.sqrt(ddx*ddx + ddy*ddy);
+                    if (dd > 2) {
+                        p.x = Math.max(0, Math.min(W, p.x + (ddx/dd)*Math.min(p.speed*0.6, dd)));
+                        p.y = Math.max(0, Math.min(H, p.y + (ddy/dd)*Math.min(p.speed*0.6, dd)));
                     }
+                    p.targetX = p.x; p.targetY = p.y;
                 }
             } else if (p.activity === 'visiting') {
                 if (!p.indoors) {
@@ -861,18 +861,18 @@ function gameLoop() {
                         p.indoors = true;
                     }
                 } else {
-                    // Gentle drift within the enclosure bubble (offset from host)
+                    // Face-to-face: guest stands opposite the host
                     const h = state.houses[p.guestOfIndex];
-                    const r = 38;
-                    const dx = p.targetX - p.x, dy = p.targetY - p.y;
-                    const d  = Math.sqrt(dx*dx + dy*dy);
-                    if (d <= p.speed * 0.4) {
-                        p.targetX = h.x + (Math.random() * 2 - 1) * r;
-                        p.targetY = h.y + GATOR_SIZE * 0.5 + (Math.random() * 2 - 1) * (r * 0.5);
-                    } else {
-                        p.x += (dx/d) * p.speed * 0.4;
-                        p.y += (dy/d) * p.speed * 0.4;
+                    const faceGap = GATOR_SIZE * 0.9;
+                    const guestTargetX = h.doorX + faceGap;
+                    const guestTargetY = h.doorY - GATOR_SIZE;
+                    const ddx = guestTargetX - p.x, ddy = guestTargetY - p.y;
+                    const dd  = Math.sqrt(ddx*ddx + ddy*ddy);
+                    if (dd > 2) {
+                        p.x = Math.max(0, Math.min(W, p.x + (ddx/dd)*Math.min(p.speed*0.6, dd)));
+                        p.y = Math.max(0, Math.min(H, p.y + (ddy/dd)*Math.min(p.speed*0.6, dd)));
                     }
+                    p.targetX = p.x; p.targetY = p.y;
                 }
             } else if (p.activity === 'debating') {
                 const dx = p.targetX - p.x, dy = p.targetY - p.y;
@@ -883,19 +883,43 @@ function gameLoop() {
                 }
             } else if (p.activity === 'talking') {
                 const partner = state.gators.find(q => q.id === p.talkingTo);
-                if (partner) {
-                    const dx = (partner.x+cx)-(p.x+cx), dy = (partner.y+cx)-(p.y+cx);
-                    const d  = Math.sqrt(dx*dx+dy*dy);
-                    // Keep closing until gators are face-to-face; stop well within TALK_STOP
-                    const stopAt = GATOR_SIZE * 0.6;
-                    if (d > stopAt) {
-                        const s = p.speed * 0.5;
-                        p.x = Math.max(0, Math.min(W, p.x+(dx/d)*s));
-                        p.y = Math.max(0, Math.min(H, p.y+(dy/d)*s));
+                if (partner && p.id < partner.id) {
+                    // Only the lower-id gator computes the facing positions (once per frame)
+                    // to avoid both gators fighting over the midpoint calculation.
+                    const cx2 = GATOR_SIZE / 2;
+                    const mx = (p.x + partner.x) / 2;
+                    const my = (p.y + partner.y) / 2;
+                    const faceGap = GATOR_SIZE * 1.2;
+                    // Determine facing axis: if mostly horizontal, stand side-by-side
+                    const rawDx = partner.x - p.x;
+                    const rawDy = partner.y - p.y;
+                    const rawD  = Math.sqrt(rawDx*rawDx + rawDy*rawDy) || 1;
+                    // Snap each gator toward their face-to-face slot
+                    const pDx = p.x - mx, pDy = p.y - my;
+                    const pD  = Math.sqrt(pDx*pDx + pDy*pDy) || 1;
+                    const pTargetX = mx + (pDx/pD) * faceGap;
+                    const pTargetY = my + (pDy/pD) * faceGap;
+                    const bDx = partner.x - mx, bDy = partner.y - my;
+                    const bD  = Math.sqrt(bDx*bDx + bDy*bDy) || 1;
+                    const bTargetX = mx + (bDx/bD) * faceGap;
+                    const bTargetY = my + (bDy/bD) * faceGap;
+                    // Move toward face-to-face slot at reduced speed, then stop
+                    const SNAP_SPEED = p.speed * 0.8;
+                    const pdx = pTargetX - p.x, pdy2 = pTargetY - p.y;
+                    const pd  = Math.sqrt(pdx*pdx + pdy2*pdy2);
+                    if (pd > 2) {
+                        p.x = Math.max(0, Math.min(W, p.x + (pdx/pd)*Math.min(SNAP_SPEED, pd)));
+                        p.y = Math.max(0, Math.min(H, p.y + (pdy2/pd)*Math.min(SNAP_SPEED, pd)));
                     }
-                    // Don't let a talking gator drift away toward a stale targetX/Y
-                    p.targetX = p.x;
-                    p.targetY = p.y;
+                    const bdx = bTargetX - partner.x, bdy2 = bTargetY - partner.y;
+                    const bd  = Math.sqrt(bdx*bdx + bdy2*bdy2);
+                    if (bd > 2) {
+                        partner.x = Math.max(0, Math.min(W, partner.x + (bdx/bd)*Math.min(SNAP_SPEED, bd)));
+                        partner.y = Math.max(0, Math.min(H, partner.y + (bdy2/bd)*Math.min(SNAP_SPEED, bd)));
+                    }
+                    // Lock targets so nothing else moves them
+                    p.targetX = p.x; p.targetY = p.y;
+                    partner.targetX = partner.x; partner.targetY = partner.y;
                 }
             } else {
                 // Default movement behavior

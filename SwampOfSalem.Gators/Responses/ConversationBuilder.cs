@@ -1,6 +1,7 @@
 using SwampOfSalem.Gators.Phrases;
 using SwampOfSalem.Gators.Thinking;
 using SwampOfSalem.Shared.DTOs;
+using SwampOfSalem.Shared.Enums;
 using SwampOfSalem.Shared.Models;
 
 namespace SwampOfSalem.Gators.Responses;
@@ -89,6 +90,27 @@ public static class ConversationBuilder
         };
     }
 
+    // ── Clique-aware relation drift ───────────────────────────────────────────
+    // Applied externally by the caller after receiving a response. This helper
+    // provides the drift delta that should be applied to both participants.
+
+    /// <summary>
+    /// Returns the relation drift multiplier for a conversation between two gators.
+    /// Clique-mates drift toward each other faster; rival-clique members drift
+    /// negatively even when the surface conversation is neutral.
+    /// </summary>
+    public static double GetCliqueDriftMultiplier(
+        Alligator a, Alligator b, GameState gameState)
+    {
+        if (CliqueService.SameClique(a, b))
+            return 1.6;   // clique solidarity — bonds strengthen quickly
+
+        if (CliqueService.AreRivals(a, b, gameState))
+            return -0.5;  // even a civil chat leaves an undercurrent of tension
+
+        return 1.0;  // unrelated gators: normal drift
+    }
+
     // ── Turn generation ──────────────────────────────────────────────────────
 
     private static (string Spoken, string Thought) GenerateTurn(
@@ -115,6 +137,21 @@ public static class ConversationBuilder
             return (spoken, thought);
         }
 
+        // Mood conversation overlay (~60 % chance when non-normal mood)
+        if (speaker.Mood != Mood.Normal && !MoodPhraseBanks.AvoidsSocialising(speaker.Mood))
+        {
+            var moodPhrases = MoodPhraseBanks.GetConversation(speaker.Mood);
+            if (moodPhrases.Length > 0 && rng.Next(5) < 3)
+            {
+                string moodRaw = ThoughtEngine.Pick(moodPhrases, rng);
+                string moodSpoken = ThoughtEngine.Substitute(
+                    moodRaw, speaker.Name, listener.Name,
+                    ResolveSuspect(speaker, gameState), null, ResolveDecoy(speaker, gameState));
+                string moodThought = ThoughtEngine.Generate(speaker, gameState, rng, listener.Id);
+                return (moodSpoken, moodThought);
+            }
+        }
+
         var phrases = PhraseBanks.Get(speaker.Personality, dialogType, tier);
         string rawSpoken = ThoughtEngine.Pick(phrases, rng);
         string suspect = ResolveSuspect(speaker, gameState);
@@ -139,12 +176,24 @@ public static class ConversationBuilder
         bool highSuspicion = initiator.Suspicion.Values.Any(v => v > 40)
                           || responder.Suspicion.Values.Any(v => v > 40);
 
+        bool initiatorAvoiding = MoodPhraseBanks.AvoidsSocialising(initiator.Mood);
+        bool responderAvoiding = MoodPhraseBanks.AvoidsSocialising(responder.Mood);
+
+        // Rival-clique conversations are charged — bias toward accusation/suspicion
+        bool areRivals = CliqueService.AreRivals(initiator, responder, gameState);
+        // Same-clique conversations are warm — bias toward gossip and small-talk
+        bool sameClique = CliqueService.SameClique(initiator, responder);
+
         for (int i = 0; i < turns; i++)
         {
             if (i == 0)             { seq.Add(Topic.Greeting); continue; }
             if (i == turns - 1)     { seq.Add(Topic.Farewell); continue; }
 
-            // Middle turns: weighted topics based on game state
+            if (initiatorAvoiding || responderAvoiding) { seq.Add(Topic.SmallTalk); continue; }
+
+            if (areRivals)  { seq.Add(i % 2 == 0 ? Topic.Suspicion : Topic.Gossip); continue; }
+            if (sameClique) { seq.Add(i % 2 == 0 ? Topic.Gossip    : Topic.SmallTalk); continue; }
+
             if (hasDead && i == 1) { seq.Add(Topic.Suspicion); continue; }
             if (highSuspicion && i % 2 == 0) { seq.Add(Topic.Suspicion); continue; }
             seq.Add(i % 3 == 0 ? Topic.Gossip : Topic.SmallTalk);
