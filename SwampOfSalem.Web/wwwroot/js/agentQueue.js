@@ -455,22 +455,21 @@ function _showNightGatorDetail(g, entry) {
         }).join('');
 
     // ── Conversations (chatLog) — include thoughts
-    const convHtml = (g.chatLog || []).slice().reverse().map(entry => {
-        const fromName = state.gators.find(p => p.id === entry.from)?.name ?? '?';
-        const toName   = state.gators.find(p => p.id === entry.to  )?.name ?? '?';
-        const isSelf   = entry.from === g.id;
+    const convHtml = (g.chatLog || []).slice().reverse().map(logEntry => {
+        const fromName = state.gators.find(p => p.id === logEntry.from)?.name ?? '?';
+        const toName   = state.gators.find(p => p.id === logEntry.to  )?.name ?? '?';
+        const isSelf   = logEntry.from === g.id;
         const cls      = isSelf ? 'chat-entry-self' : 'chat-entry-other';
-        const speakerCls = isSelf ? 'chat-entry-self' : 'chat-entry-other';
         const label    = isSelf ? `You → ${toName}` : `${fromName} → You`;
-        const dayLabel = entry.day != null ? `Day ${entry.day}` : '';
+        const dayLabel = logEntry.day != null ? `Day ${logEntry.day}` : '';
         let html = `<div class="chat-entry ${cls}">
             <span class="chat-speaker">${label}<span class="chat-time">${dayLabel}</span></span>
-            ${entry.message ?? ''}
+            ${logEntry.message ?? ''}
         </div>`;
-        if (entry.thought) {
+        if (logEntry.thought) {
             html += `<div class="chat-entry chat-entry-thought">
                 <span class="chat-speaker">💭 ${fromName} thought</span>
-                ${entry.thought}
+                ${logEntry.thought}
             </div>`;
         }
         return html;

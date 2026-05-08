@@ -398,9 +398,10 @@ function tick() {
             }
         }
         state.talkLines.forEach(l => l.remove()); state.talkLines.clear();
+        state.noNewConversations = true;
     }
 
-    // Debate floor: one speaker at a time — advance when their timer expires.
+    // Debate floor:
     // debateSpeakerWaiting is true while an async AI call is in-flight; we freeze
     // the timer so the floor doesn't advance before the AI responds.
     if (state.gamePhase === PHASE.DEBATE) {
@@ -469,10 +470,6 @@ function tick() {
     for (const gator of activePeople) {
         gator.ticksLeft--;
 
-        // Thoughts are handled in gameLoop() on real-time schedules per gator.
-        // Speech cooldowns are also real-time; check Date.now() against nextSpeakAt.
-        const now = Date.now();
-
         // Invitation disabled — conversations limited to 2 alligators
 
         if (gator.ticksLeft > 0) continue;
@@ -517,10 +514,11 @@ function tick() {
 
         // End hosting — guests leave (but only once AI drain + 3s hold is done)
         if (gator.activity === 'hosting') {
-            // Hold in place while AI call is in-flight or drain is still active
+            // Hold in place while AI call is in-flight, drain is still active, or in post-conv hold
             const aiPending = gator.isWaiting || state.gators.some(g => g.guestOfIndex === gator.homeIndex && g.isWaiting);
             const drainActive = (gator._convTurns && gator._convTurns.length > 0);
-            if (aiPending || drainActive) {
+            const holdActive  = !!gator._convHolding;
+            if (aiPending || drainActive || holdActive) {
                 gator.ticksLeft = 1;
                 continue;
             }
@@ -577,8 +575,8 @@ function tick() {
         if (next === 'talking') {
             const TALK_COOLDOWN_MS = 60_000;
             const now = Date.now();
-            // Don't start new conversations if one is already active (1-at-a-time lock)
-            if (!state.activeConversation) {
+            // Don't start new conversations if one is already active or end-of-day lock is set
+            if (!state.activeConversation && !state.noNewConversations) {
             const nearby = [...free]
                 .filter(id => id !== gator.id)
                 .map(id => state.gators.find(p => p.id === id))
@@ -647,7 +645,7 @@ function tick() {
             next = 'moving';
         }
 
-        if (next === 'hosting' && !state.activeConversation) {
+        if (next === 'hosting' && !state.activeConversation && !state.noNewConversations) {
         const TALK_COOLDOWN_MS = 60_000;
         const now = Date.now();
         const guest = [...free]
@@ -733,15 +731,7 @@ function tick() {
     }
 
     activePeople.forEach(renderGator);
-    // Remove enclosures for any hosting pair that has ended
-    for (const [homeIdx, enc] of state.privateChatBubbles) {
-        const inUse = activePeople.some(p =>
-            p.indoors &&
-            (p.activity === 'hosting' || p.activity === 'visiting') &&
-            (p.homeIndex === homeIdx || p.guestOfIndex === homeIdx)
-        );
-        if (!inUse) { enc.remove(); state.privateChatBubbles.delete(homeIdx); }
-    }
+    cleanPrivateChatBubbles();
     updateStats();
 }
 
@@ -781,8 +771,11 @@ function tick() {
  *     bubbleEl.style.left / .top    — keeps the speech bubble tracking the gator
  *     el.classList.toggle('indoors'/'indoors-private') — controls CSS visibility
  */
+let _rafFrameCount = 0;
 function gameLoop() {
     if (!state.paused) {
+        _rafFrameCount++;
+        if (_rafFrameCount % 60 === 0) refreshPinnedTooltip();
         const { W, H } = stageBounds();
         const cx = GATOR_SIZE / 2;
 
@@ -944,14 +937,9 @@ function gameLoop() {
                 el.classList.toggle('indoors-private', isPrivate);
             }
 
-            const bubbleEl = state.bubbles.get(p.id);
-            if (bubbleEl) {
-                bubbleEl.style.left = `${p.x + GATOR_SIZE / 2 - 20}px`;
-                bubbleEl.style.top  = `${p.y - 38}px`;
             }
-        }
 
-        syncTalkLines();
+            syncTalkLines();
     }
 
     state.rafId = requestAnimationFrame(gameLoop);

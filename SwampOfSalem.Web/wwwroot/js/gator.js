@@ -185,13 +185,13 @@ export function createGator(index, house) {
         // ── AI conversation playback state ────────────────────────────────
         // These fields are set by agentQueue.requestFullConversation() and
         // cleared once the last turn has been displayed.
-        // _convTurns:      Array of turn objects from the AI response.
-        // _convTurnIndex:  Index of the next turn to display.
-        // _convPartner:    The other gator in the current AI conversation.
-        // _convIsPrivate:  Whether this is a hosting (private) conversation.
-        // _convOnComplete: Callback fired after the last turn + 3-second hold.
-        // _convHolding:    true during the 3-second post-conversation hold.
-        isWaiting: false,   // true while the AI HTTP call is in-flight (shows spinning dots).
+        _convTurns:      null,  // Array of turn objects from the AI response.
+        _convTurnIndex:  0,     // Index of the next turn to display.
+        _convPartner:    null,  // The other gator in the current AI conversation.
+        _convIsPrivate:  false, // Whether this is a hosting (private) conversation.
+        _convOnComplete: null,  // Callback fired after the last turn + 3-second hold.
+        _convHolding:    false, // true during the 3-second post-conversation hold.
+        isWaiting: false,       // true while the AI HTTP call is in-flight (shows spinning dots).
     };
 }
 

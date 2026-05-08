@@ -15,6 +15,8 @@
       }
     }
     </script>
+    <!-- Babylon.js (WebGPU-capable) -->
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
     <style>
         /* Splash screen styles */
         .splash-overlay {
@@ -111,6 +113,46 @@
         }
         .btn-back:hover { background: rgba(30,65,28,.85); }
 
+        /* Babylon.js POV overlay */
+        #babylon-pov-canvas-container {
+            display: none;
+            position: fixed; inset: 0; z-index: 101;
+            background: #000;
+        }
+        #babylon-pov-canvas-container canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+        #babylon-pov-hud {
+            position: absolute; bottom: 1.2rem; left: 50%; transform: translateX(-50%);
+            display: flex; align-items: center; gap: .8rem;
+            background: rgba(4,14,8,.82); border: 1px solid rgba(80,180,80,.2);
+            border-radius: 10px; padding: .5rem 1.1rem;
+            pointer-events: auto;
+        }
+        #babylon-pov-hud button {
+            padding: .3rem .9rem; font-size: .9rem;
+            background: rgba(20,60,20,.8); color: #c8f0a8;
+            border: 1px solid rgba(80,180,60,.3); border-radius: 6px; cursor: pointer;
+        }
+        #babylon-pov-hud button:hover { background: rgba(35,90,30,.9); }
+        #babylon-pov-gator-label {
+            color: #a8d890; font-size: 1rem; min-width: 160px; text-align: center;
+        }
+        #babylon-pov-close-btn {
+            position: absolute; top: .7rem; right: 1rem;
+            font-size: 1.3rem; background: rgba(20,60,20,.8); color: #c8f0a8;
+            border: 1px solid rgba(80,180,60,.3); border-radius: 6px;
+            padding: .2rem .7rem; cursor: pointer;
+        }
+        #babylon-engine-badge {
+            position: absolute; top: .7rem; left: 1rem;
+            font-size: .75rem; color: #6ad890;
+            background: rgba(4,14,8,.75); border: 1px solid rgba(60,140,60,.25);
+            border-radius: 6px; padding: .15rem .55rem;
+            pointer-events: none;
+        }
+
         /* 3D POV overlay */
         #pov-canvas-container {
             display: none;
@@ -205,6 +247,7 @@
             <h1>🐊 Swamp of Salem</h1>
             <div class="controls">
                 <button id="povToggleBtn" class="secondary">🐊 POV</button>
+                <button id="babylonPovToggleBtn" class="secondary">🦖 BabylonJSWebGPU</button>
                 <button id="respawnBtn">↺ Respawn</button>
                 <button id="pauseBtn" class="secondary">⏸ Pause</button>
                 <button id="testConvBtn" class="secondary" title="Trigger a test conversation between two gators">🗨 Test Conv</button>
@@ -245,6 +288,17 @@
             <button id="pov-prev-btn">◀</button>
             <span id="pov-gator-label">🐊 —</span>
             <button id="pov-next-btn">▶</button>
+        </div>
+    </div>
+
+    <!-- Babylon.js WebGPU POV Overlay -->
+    <div id="babylon-pov-canvas-container">
+        <button id="babylon-pov-close-btn" title="Exit Babylon POV">✕ Exit POV</button>
+        <div id="babylon-engine-badge">Babylon.js · WebGPU</div>
+        <div id="babylon-pov-hud">
+            <button id="babylon-pov-prev-btn">◀</button>
+            <span id="babylon-pov-gator-label">🐊 —</span>
+            <button id="babylon-pov-next-btn">▶</button>
         </div>
     </div>
 
@@ -544,6 +598,70 @@
                 exitPOV();
             }
         });
+
+        // ── Babylon.js WebGPU POV Mode ────────────────────────────────────────
+        let babylonPovActive = false;
+        let babylonModule = null;
+
+        async function loadBabylonMod() {
+            if (!babylonModule) {
+                babylonModule = await import('./js/gatorBabylon.js');
+            }
+            return babylonModule;
+        }
+
+        document.getElementById('babylonPovToggleBtn').addEventListener('click', async () => {
+            if (babylonPovActive) {
+                exitBabylonPOV();
+            } else {
+                await enterBabylonPOV();
+            }
+        });
+
+        document.getElementById('babylon-pov-close-btn').addEventListener('click', exitBabylonPOV);
+
+        document.getElementById('babylon-pov-next-btn').addEventListener('click', async () => {
+            const mod = await loadBabylonMod();
+            mod.nextGator();
+        });
+
+        document.getElementById('babylon-pov-prev-btn').addEventListener('click', async () => {
+            const mod = await loadBabylonMod();
+            mod.prevGator();
+        });
+
+        document.addEventListener('keydown', async e => {
+            if (!babylonPovActive) return;
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                const mod = await loadBabylonMod();
+                mod.nextGator();
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                const mod = await loadBabylonMod();
+                mod.prevGator();
+            } else if (e.key === 'Escape') {
+                exitBabylonPOV();
+            }
+        });
+
+        async function enterBabylonPOV() {
+            const container = document.getElementById('babylon-pov-canvas-container');
+            container.style.display = 'block';
+            babylonPovActive = true;
+            document.getElementById('babylonPovToggleBtn').textContent = '🗺️ 2D';
+            const mod = await loadBabylonMod();
+            await mod.initBabylon(container);
+        }
+
+        function exitBabylonPOV() {
+            const container = document.getElementById('babylon-pov-canvas-container');
+            container.style.display = 'none';
+            babylonPovActive = false;
+            document.getElementById('babylonPovToggleBtn').textContent = '🦖 BabylonJSWebGPU';
+            if (babylonModule) {
+                babylonModule.destroyBabylon();
+                babylonModule = null;
+            }
+        }
 
         async function enterPOV() {
             const container = document.getElementById('pov-canvas-container');
