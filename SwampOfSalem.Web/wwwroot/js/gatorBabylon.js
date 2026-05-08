@@ -20,7 +20,7 @@ import { living } from './gator.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const SCALE  = 0.1;
-const CAM_H  = 2.0;
+const CAM_H  = 2.7;
 const HOUSE_W = 12;
 const HOUSE_H = 7;
 const HOUSE_D = 12;
@@ -156,84 +156,228 @@ function buildHouses() {
     });
 }
 
-// ── Gator meshes ───────────────────────────────────────────────────────────
+// ── Gator meshes (upright, bipedal — walks like a human) ─────────────────
 function getOrCreateGatorMesh(gator) {
     if (gatorMeshes.has(gator.id)) return gatorMeshes.get(gator.id);
 
     const BABYLON = window.BABYLON;
     const isDead  = state.deadIds.has(gator.id);
 
-    const bodyColor = isDead ? new BABYLON.Color3(0.33, 0.33, 0.33) : new BABYLON.Color3(0.29, 0.48, 0.19);
+    // Skin
+    const skin = isDead ? new BABYLON.Color3(0.33, 0.33, 0.33)
+                        : new BABYLON.Color3(0.29, 0.48, 0.19);
     const bodyMat = new BABYLON.StandardMaterial(`bmat${gator.id}`, scene);
-    bodyMat.diffuseColor = bodyColor;
-    if (isDead) { bodyMat.alpha = 0.4; }
+    bodyMat.diffuseColor = skin;
+    if (isDead) bodyMat.alpha = 0.4;
+
+    const bellyMat = new BABYLON.StandardMaterial(`belmat${gator.id}`, scene);
+    bellyMat.diffuseColor = new BABYLON.Color3(0.74, 0.78, 0.50);
 
     const snoutMat = new BABYLON.StandardMaterial(`smat${gator.id}`, scene);
     snoutMat.diffuseColor = new BABYLON.Color3(0.24, 0.38, 0.15);
 
     const eyeMat = new BABYLON.StandardMaterial(`emat${gator.id}`, scene);
-    eyeMat.diffuseColor = new BABYLON.Color3(1, 0.87, 0);
+    eyeMat.diffuseColor  = new BABYLON.Color3(1, 1, 1);
+    eyeMat.emissiveColor = new BABYLON.Color3(0.6, 0.6, 0.0);
 
-    // Label colour
-    const colors = [
+    const toothMat = new BABYLON.StandardMaterial(`tmat${gator.id}`, scene);
+    toothMat.diffuseColor = new BABYLON.Color3(1, 1, 0.92);
+
+    // Per-gator label / shirt accent colour
+    const palette = [
         new BABYLON.Color3(1,0.40,0.27), new BABYLON.Color3(0.27,0.67,1),
         new BABYLON.Color3(1,0.80,0.13), new BABYLON.Color3(0.67,0.40,1),
         new BABYLON.Color3(0.27,1,0.67), new BABYLON.Color3(1,0.27,0.67),
         new BABYLON.Color3(0.53,1,0.80), new BABYLON.Color3(1,0.67,0.27),
         new BABYLON.Color3(0.40,0.73,1),
     ];
-    const labelMat = new BABYLON.StandardMaterial(`lmat${gator.id}`, scene);
-    labelMat.diffuseColor = colors[gator.id % colors.length];
-    labelMat.emissiveColor = colors[gator.id % colors.length];
+    const accent = palette[gator.id % palette.length];
+    const shirtMat = new BABYLON.StandardMaterial(`shirt${gator.id}`, scene);
+    shirtMat.diffuseColor  = accent;
+    shirtMat.emissiveColor = accent.scale(0.25);
 
-    const parent = new BABYLON.TransformNode(`gator${gator.id}`, scene);
+    const pantsMat = new BABYLON.StandardMaterial(`pants${gator.id}`, scene);
+    pantsMat.diffuseColor = new BABYLON.Color3(0.18, 0.22, 0.42);
 
-    const body = BABYLON.MeshBuilder.CreateBox(`body${gator.id}`, { width: 1.4, height: 0.6, depth: 3.0 }, scene);
-    body.position.y = 0.5; body.material = bodyMat; body.parent = parent;
+    const shoeMat = new BABYLON.StandardMaterial(`shoe${gator.id}`, scene);
+    shoeMat.diffuseColor = new BABYLON.Color3(0.10, 0.06, 0.04);
 
-    const head = BABYLON.MeshBuilder.CreateBox(`head${gator.id}`, { width: 0.9, height: 0.5, depth: 1.2 }, scene);
-    head.position = new BABYLON.Vector3(0, 0.5, -1.8); head.material = bodyMat; head.parent = parent;
+    // Root — feet on the ground; whole body sits ~3 units tall
+    const root = new BABYLON.TransformNode(`gator${gator.id}`, scene);
 
-    const snout = BABYLON.MeshBuilder.CreateBox(`snout${gator.id}`, { width: 0.7, height: 0.25, depth: 0.8 }, scene);
-    snout.position = new BABYLON.Vector3(0, 0.38, -2.55); snout.material = snoutMat; snout.parent = parent;
+    // Torso (shirt)
+    const torso = BABYLON.MeshBuilder.CreateBox(`torso${gator.id}`,
+        { width: 1.0, height: 1.2, depth: 0.55 }, scene);
+    torso.position.y = 1.7;
+    torso.material = shirtMat;
+    torso.parent = root;
 
-    [-0.28, 0.28].forEach((ex, ei) => {
-        const eye = BABYLON.MeshBuilder.CreateSphere(`eye${gator.id}_${ei}`, { diameter: 0.2, segments: 6 }, scene);
-        eye.position = new BABYLON.Vector3(ex, 0.78, -1.75); eye.material = eyeMat; eye.parent = parent;
+    // Belly accent strip on torso front
+    const belly = BABYLON.MeshBuilder.CreateBox(`belly${gator.id}`,
+        { width: 0.55, height: 0.9, depth: 0.05 }, scene);
+    belly.position = new BABYLON.Vector3(0, 1.65, -0.30);
+    belly.material = bellyMat;
+    belly.parent = root;
+
+    // Hips (pants top)
+    const hips = BABYLON.MeshBuilder.CreateBox(`hips${gator.id}`,
+        { width: 1.0, height: 0.35, depth: 0.55 }, scene);
+    hips.position.y = 1.0;
+    hips.material = pantsMat;
+    hips.parent = root;
+
+    // Legs — pivot at hip so we can swing them
+    function makeLeg(side) {
+        const pivot = new BABYLON.TransformNode(`legPivot${gator.id}_${side}`, scene);
+        pivot.position = new BABYLON.Vector3(side * 0.28, 0.85, 0);
+        pivot.parent = root;
+
+        const upper = BABYLON.MeshBuilder.CreateBox(`upperLeg${gator.id}_${side}`,
+            { width: 0.34, height: 0.85, depth: 0.36 }, scene);
+        upper.position.y = -0.425;
+        upper.material = pantsMat;
+        upper.parent = pivot;
+
+        const shoe = BABYLON.MeshBuilder.CreateBox(`shoe${gator.id}_${side}`,
+            { width: 0.40, height: 0.18, depth: 0.62 }, scene);
+        shoe.position = new BABYLON.Vector3(0, -0.94, 0.10);
+        shoe.material = shoeMat;
+        shoe.parent = pivot;
+        return pivot;
+    }
+    const legL = makeLeg(-1);
+    const legR = makeLeg(+1);
+
+    // Arms — pivot at shoulder
+    function makeArm(side) {
+        const pivot = new BABYLON.TransformNode(`armPivot${gator.id}_${side}`, scene);
+        pivot.position = new BABYLON.Vector3(side * 0.62, 2.18, 0);
+        pivot.parent = root;
+
+        const upper = BABYLON.MeshBuilder.CreateBox(`upperArm${gator.id}_${side}`,
+            { width: 0.26, height: 0.95, depth: 0.28 }, scene);
+        upper.position.y = -0.475;
+        upper.material = bodyMat;
+        upper.parent = pivot;
+
+        const hand = BABYLON.MeshBuilder.CreateSphere(`hand${gator.id}_${side}`,
+            { diameter: 0.30, segments: 6 }, scene);
+        hand.position.y = -1.05;
+        hand.material = bodyMat;
+        hand.parent = pivot;
+        return pivot;
+    }
+    const armL = makeArm(-1);
+    const armR = makeArm(+1);
+
+    // Head — alligator head sits on top of torso, snout points forward (-Z)
+    const headPivot = new BABYLON.TransformNode(`headPivot${gator.id}`, scene);
+    headPivot.position = new BABYLON.Vector3(0, 2.45, 0);
+    headPivot.parent = root;
+
+    const skull = BABYLON.MeshBuilder.CreateBox(`skull${gator.id}`,
+        { width: 0.85, height: 0.55, depth: 0.85 }, scene);
+    skull.material = bodyMat;
+    skull.parent = headPivot;
+
+    const snout = BABYLON.MeshBuilder.CreateBox(`snout${gator.id}`,
+        { width: 0.7, height: 0.32, depth: 0.95 }, scene);
+    snout.position = new BABYLON.Vector3(0, -0.08, -0.85);
+    snout.material = snoutMat;
+    snout.parent = headPivot;
+
+    // Teeth row (top + bottom)
+    const teethTop = BABYLON.MeshBuilder.CreateBox(`teethT${gator.id}`,
+        { width: 0.6, height: 0.05, depth: 0.85 }, scene);
+    teethTop.position = new BABYLON.Vector3(0, -0.20, -0.85);
+    teethTop.material = toothMat;
+    teethTop.parent = headPivot;
+
+    [-0.22, 0.22].forEach((ex, ei) => {
+        const eye = BABYLON.MeshBuilder.CreateSphere(`eye${gator.id}_${ei}`,
+            { diameter: 0.20, segments: 8 }, scene);
+        eye.position = new BABYLON.Vector3(ex, 0.32, -0.10);
+        eye.material = eyeMat;
+        eye.parent = headPivot;
+
+        // Pupil
+        const pupil = BABYLON.MeshBuilder.CreateSphere(`pupil${gator.id}_${ei}`,
+            { diameter: 0.09, segments: 6 }, scene);
+        pupil.position = new BABYLON.Vector3(ex, 0.30, -0.18);
+        const pmat = new BABYLON.StandardMaterial(`pmat${gator.id}_${ei}`, scene);
+        pmat.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        pupil.material = pmat;
+        pupil.parent = headPivot;
     });
 
-    const tail = BABYLON.MeshBuilder.CreateBox(`tail${gator.id}`, { width: 0.6, height: 0.35, depth: 1.4 }, scene);
-    tail.position = new BABYLON.Vector3(0, 0.42, 1.7); tail.material = bodyMat; tail.parent = parent;
+    // Tail — small stub at the back of the hips for the alligator silhouette
+    const tail = BABYLON.MeshBuilder.CreateBox(`tail${gator.id}`,
+        { width: 0.40, height: 0.30, depth: 0.85 }, scene);
+    tail.position = new BABYLON.Vector3(0, 1.0, 0.55);
+    tail.rotation.x = -0.35;
+    tail.material = bodyMat;
+    tail.parent = root;
 
-    const label = BABYLON.MeshBuilder.CreateBox(`label${gator.id}`, { width: 1.0, height: 0.4, depth: 0.08 }, scene);
-    label.position = new BABYLON.Vector3(0, 1.4, -1.5); label.material = labelMat; label.parent = parent;
+    // Floating name label (above head)
+    const label = BABYLON.MeshBuilder.CreatePlane(`label${gator.id}`,
+        { width: 1.4, height: 0.45 }, scene);
+    label.position = new BABYLON.Vector3(0, 3.2, 0);
+    label.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+    const labelMat = new BABYLON.StandardMaterial(`lmat${gator.id}`, scene);
+    labelMat.emissiveColor = accent;
+    labelMat.diffuseColor  = accent;
+    labelMat.disableLighting = true;
+    label.material = labelMat;
+    label.parent = root;
 
-    gatorMeshes.set(gator.id, parent);
-    return parent;
+    const meshData = { root, headPivot, legL, legR, armL, armR, walkPhase: Math.random() * Math.PI * 2 };
+    gatorMeshes.set(gator.id, meshData);
+    return meshData;
 }
 
-function syncGatorMeshes() {
+function syncGatorMeshes(deltaSec) {
     const seen = new Set();
     state.gators.forEach(g => {
-        const parent = getOrCreateGatorMesh(g);
+        const data = getOrCreateGatorMesh(g);
+        const { root, legL, legR, armL, armR } = data;
         seen.add(g.id);
 
         const gx = worldX(g.x);
         const gz = worldZ(g.y);
-        parent.position.x = gx;
-        parent.position.z = gz;
-        parent.position.y = state.deadIds.has(g.id) ? -0.3 : 0;
+        root.position.x = gx;
+        root.position.z = gz;
+        const dead = state.deadIds.has(g.id);
+        root.position.y = dead ? -0.3 : 0;
 
-        const mdx = (g.targetX ?? g.x) - g.x;
-        const mdy = (g.targetY ?? g.y) - g.y;
-        if (Math.abs(mdx) + Math.abs(mdy) > 4) {
-            parent.rotation.y = Math.atan2(mdx, mdy);
+        const dx = (g.targetX ?? g.x) - g.x;
+        const dy = (g.targetY ?? g.y) - g.y;
+        const moveDist = Math.sqrt(dx * dx + dy * dy);
+        if (moveDist > 4) {
+            // Face direction of motion (snout points -Z, so atan2(dx, dy) works)
+            root.rotation.y = Math.atan2(dx, dy);
+        }
+
+        // Walk cycle: legs swing opposite, arms swing opposite to legs, torso bobs
+        if (!dead) {
+            const moving = moveDist > 4;
+            const speed = moving ? 8.0 : 0;
+            data.walkPhase += deltaSec * speed;
+            const swing = moving ? Math.sin(data.walkPhase) * 0.9 : 0;
+            legL.rotation.x =  swing;
+            legR.rotation.x = -swing;
+            armL.rotation.x = -swing * 0.85;
+            armR.rotation.x =  swing * 0.85;
+            const bob = moving ? Math.abs(Math.sin(data.walkPhase)) * 0.08 : 0;
+            root.position.y = bob;
+        } else {
+            legL.rotation.x = legR.rotation.x = 0;
+            armL.rotation.x = armR.rotation.x = 0;
         }
     });
 
-    gatorMeshes.forEach((mesh, id) => {
+    gatorMeshes.forEach((data, id) => {
         if (!seen.has(id)) {
-            mesh.dispose();
+            data.root.dispose();
             gatorMeshes.delete(id);
         }
     });
@@ -269,12 +413,113 @@ function updateCamera() {
         lookZ = worldZ(gator.y + (400 - gator.y) * 0.3);
     }
 
-    camera.setTarget(new window.BABYLON.Vector3(lookX, CAM_H * 0.6, lookZ));
+    camera.setTarget(new window.BABYLON.Vector3(lookX, CAM_H * 0.85, lookZ));
 
     // Hide active gator's own mesh
-    gatorMeshes.forEach((mesh, id) => {
-        mesh.setEnabled(id !== gator.id);
+    gatorMeshes.forEach((data, id) => {
+        data.root.setEnabled(id !== gator.id);
     });
+}
+
+// ── POV chat bubbles ────────────────────────────────────────────────────────
+// Maps gatorId → <div class="pov-bubble"> that is currently in the DOM
+const _povBubbleDivs = new Map();
+
+function _projectHead(gatorId) {
+    const BABYLON = window.BABYLON;
+    const data = gatorMeshes.get(gatorId);
+    if (!data || !data.root || !scene || !engine || !camera) return null;
+    // Head top is at root.y + ~3.0 (root sits at 0)
+    const worldPos = data.root.position.clone();
+    worldPos.y += 3.2;
+    try {
+        const vp = camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight());
+        const screen = BABYLON.Vector3.Project(
+            worldPos,
+            BABYLON.Matrix.Identity(),
+            scene.getTransformMatrix(),
+            vp
+        );
+        const dpr = window.devicePixelRatio || 1;
+        const cx = screen.x / dpr;
+        const cy = screen.y / dpr;
+        // Discard if behind camera or off-screen
+        if (screen.z < 0 || screen.z > 1) return null;
+        if (cx < -60 || cy < -60) return null;
+        return { x: cx, y: cy };
+    } catch (_) { return null; }
+}
+
+function updatePovBubbles(activeGator) {
+    const bubbleLayer = document.getElementById('pov-bubble-layer');
+    const selfSpeech  = document.getElementById('pov-self-speech');
+    const selfName    = document.getElementById('pov-self-name');
+    const selfText    = document.getElementById('pov-self-text');
+    if (!bubbleLayer || !selfSpeech) return;
+
+    const seenIds = new Set();
+
+    state.gators.forEach(g => {
+        if (!g || state.deadIds.has(g.id)) return;
+        const hasContent = g.message || g.isWaiting;
+        if (!hasContent) return;
+
+        const isSelf = activeGator && g.id === activeGator.id;
+
+        if (isSelf) {
+            // ── Self speech bar ───────────────────────────────────────────
+            selfSpeech.style.display = 'block';
+            selfName.textContent = g.name;
+            if (g.isWaiting && !g.message) {
+                selfText.innerHTML = '<em>thinking…</em>';
+            } else if (g.message) {
+                selfText.textContent = g.message;
+            }
+            return;
+        }
+
+        // ── Other gator floating bubble ───────────────────────────────────
+        const sp = _projectHead(g.id);
+        if (!sp) return; // behind camera / not spawned yet
+
+        seenIds.add(g.id);
+        let div = _povBubbleDivs.get(g.id);
+        if (!div) {
+            div = document.createElement('div');
+            div.className = 'pov-bubble';
+            div.innerHTML = `<span class="pov-bubble-name"></span><span class="pov-bubble-text"></span>`;
+            bubbleLayer.appendChild(div);
+            _povBubbleDivs.set(g.id, div);
+        }
+
+        div.querySelector('.pov-bubble-name').textContent = g.name;
+        const textEl = div.querySelector('.pov-bubble-text');
+        if (g.isWaiting && !g.message) {
+            textEl.innerHTML = '<em class="pov-bubble-waiting">…</em>';
+        } else if (g.message) {
+            textEl.textContent = g.message;
+        }
+
+        // Position: leave 12px margin above head
+        div.style.left = `${sp.x}px`;
+        div.style.top  = `${sp.y - 14}px`;
+    });
+
+    // Remove bubbles for gators who no longer have anything to say
+    _povBubbleDivs.forEach((div, id) => {
+        if (!seenIds.has(id)) {
+            div.remove();
+            _povBubbleDivs.delete(id);
+        }
+    });
+
+    // Hide self-speech bar if POV gator is not talking
+    if (activeGator) {
+        const g = activeGator;
+        if (!g.message && !g.isWaiting) selfSpeech.style.display = 'none';
+    } else {
+        selfSpeech.style.display = 'none';
+    }
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -315,8 +560,15 @@ export async function initBabylon(container) {
         if (!scene) return;
         if (state.houses.length > 0 && houseMeshes.length === 0) buildHouses();
         if (state.gators.length > 0) {
-            syncGatorMeshes();
+            const dt = engine.getDeltaTime() / 1000;
+            syncGatorMeshes(dt);
             updateCamera();
+            const alive = living();
+            const activeGator = alive[activeGatorIndex % Math.max(alive.length, 1)] ?? null;
+            updatePovBubbles(activeGator);
+            // Update HUD label
+            const label = document.getElementById('babylon-pov-gator-label');
+            if (label && activeGator) label.textContent = `🐊 ${activeGator.name}`;
         }
         scene.render();
     });
@@ -327,7 +579,13 @@ export function destroyBabylon() {
     initialized = false;
     window.removeEventListener('resize', onResize);
 
-    gatorMeshes.forEach(m => m.dispose());
+    // Clear POV bubble DOM
+    _povBubbleDivs.forEach(d => d.remove());
+    _povBubbleDivs.clear();
+    const selfSpeech = document.getElementById('pov-self-speech');
+    if (selfSpeech) selfSpeech.style.display = 'none';
+
+    gatorMeshes.forEach(d => d.root.dispose());
     gatorMeshes.clear();
     houseMeshes.forEach(m => m.dispose());
     houseMeshes = [];

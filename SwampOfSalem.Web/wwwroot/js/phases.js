@@ -42,6 +42,8 @@ import { rnd, rndF, speakDelayMs } from './helpers.js';
 import { living } from './gator.js';
 import { state } from './state.js';
 import { renderAllGators, updateStats, updatePhaseLabel, updateHouseGuests, showDeadBody } from './rendering.js';
+
+function _applyScenePhase() { /* no-op: 2D world */ }
 import { requestDialog, recordMemory, requestNightReport, requestFullConversation, requestDebateSpeech, buildDebateLine as _buildDebateLine } from './agentQueue.js';
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -181,6 +183,7 @@ export function triggerNightfall() {
     }
 
     state.gamePhase      = PHASE.NIGHT;
+    _applyScenePhase();
     state.isNight        = true;
     state.cycleTimer     = NIGHT_TICKS;
     state.nightVictimId  = (murderVictim() || {id: null}).id;
@@ -249,6 +252,7 @@ export function triggerNightfall() {
  */
 export function triggerDawn() {
     state.gamePhase = PHASE.DAWN;
+    _applyScenePhase();
     state.isNight   = false;
     state.cycleTimer = DAWN_TICKS;
     setNightOverlay(false);
@@ -324,6 +328,7 @@ export function triggerDawn() {
  */
 export function triggerDebate() {
     state.gamePhase  = PHASE.DEBATE;
+    _applyScenePhase();
     state.cycleTimer = DEBATE_TICKS;
 
     const alive = living();
@@ -621,6 +626,7 @@ export function decideVote(voter) {
  */
 export function triggerVote(tiedCandidateIds = null) {
     state.gamePhase        = PHASE.VOTE;
+    _applyScenePhase();
     state.voteOrder        = living().slice().sort(() => Math.random() - 0.5);
     state.voteIndex        = 0;
     state.voteResults      = {};
@@ -829,6 +835,7 @@ export function triggerExecute() {
     state.condemnedId  = state.voteTarget;
     state.executeTimer = 3;
     state.gamePhase    = PHASE.EXECUTE;
+    _applyScenePhase();
     state.cycleTimer   = state.executeTimer + 8;
 
     const condemned = state.gators.find(p => p.id === state.condemnedId);
@@ -931,6 +938,7 @@ export function finaliseExecution() {
     }
     // Start new day
     state.gamePhase  = PHASE.DAY;
+    _applyScenePhase();
     state.isNight    = false;
     state.cycleTimer = DAY_TICKS;
     for (const p of living()) {
@@ -1309,6 +1317,7 @@ ${byGatorHtml}
  */
 export function triggerGameOver(townWins) {
     state.gamePhase = PHASE.OVER;
+    _applyScenePhase();
     // stopAll will be called by simulation.js via the import
     if (state.tickInterval) { clearInterval(state.tickInterval); state.tickInterval = null; }
     if (state.rafId !== null) { cancelAnimationFrame(state.rafId); state.rafId = null; }

@@ -31,6 +31,10 @@ import { relationEmoji, relationColor } from './helpers.js';
 import { living } from './gator.js';
 import { state } from './state.js';
 
+// Public hook kept as a no-op for backwards compatibility with simulation.js;
+// Babylon is no longer used to render the main world (POV mode only).
+export function syncBabylonMeshes() { /* no-op: 2D world */ }
+
 // ── Stats bar ─────────────────────────────────────────────────
 export function updateStats() {
     const c = { moving:0, talking:0, hosting:0, visiting:0, debating:0 };

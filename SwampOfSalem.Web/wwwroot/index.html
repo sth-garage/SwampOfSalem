@@ -8,14 +8,7 @@
     <base href="/" />
     <link rel="stylesheet" href="css/swamp-of-salem.css" />
     <link rel="icon" type="image/png" href="favicon.png" />
-    <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js"
-      }
-    }
-    </script>
-    <!-- Babylon.js (WebGPU-capable) -->
+    <!-- Babylon.js (used only by the alligator POV mode) -->
     <script src="https://cdn.babylonjs.com/babylon.js"></script>
     <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
     <script src="https://cdn.babylonjs.com/postProcessesLibrary/babylonjs.postProcess.min.js"></script>
@@ -155,37 +148,71 @@
             pointer-events: none;
         }
 
-        /* 3D POV overlay */
-        #pov-canvas-container {
+        /* ── POV chat bubbles ── */
+        #pov-bubble-layer {
+            position: absolute; inset: 0;
+            pointer-events: none; z-index: 10;
+            overflow: hidden;
+        }
+        .pov-bubble {
+            position: absolute;
+            transform: translate(-50%, -100%);
+            background: rgba(8, 28, 10, 0.88);
+            border: 1px solid rgba(80, 200, 80, 0.35);
+            border-radius: 10px;
+            padding: .28rem .62rem;
+            max-width: 220px;
+            font-size: .82rem;
+            color: #d0f0b8;
+            text-align: center;
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.35;
+            pointer-events: none;
+            transition: opacity .25s;
+        }
+        .pov-bubble::after {
+            content: '';
+            position: absolute;
+            bottom: -7px; left: 50%; transform: translateX(-50%);
+            border: 7px solid transparent;
+            border-top-color: rgba(80, 200, 80, 0.35);
+            border-bottom: none;
+        }
+        .pov-bubble .pov-bubble-name {
+            display: block;
+            font-size: .70rem;
+            font-weight: 700;
+            color: #78e890;
+            margin-bottom: .15rem;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+        }
+        .pov-bubble-waiting { opacity: .6; font-style: italic; }
+
+        /* ── Self-speech bar at bottom ── */
+        #pov-self-speech {
+            position: absolute;
+            bottom: 5rem; left: 50%; transform: translateX(-50%);
+            width: min(640px, 90vw);
+            background: rgba(6, 20, 8, 0.92);
+            border: 1px solid rgba(100, 220, 100, 0.4);
+            border-radius: 12px;
+            padding: .5rem 1rem;
+            font-size: .92rem;
+            color: #d8f8c0;
+            text-align: center;
+            z-index: 11;
+            pointer-events: none;
             display: none;
-            position: fixed; inset: 0; z-index: 100;
-            background: #000;
         }
-        #pov-canvas-container canvas {
-            width: 100% !important;
-            height: 100% !important;
-        }
-        #pov-hud {
-            position: absolute; bottom: 1.2rem; left: 50%; transform: translateX(-50%);
-            display: flex; align-items: center; gap: .8rem;
-            background: rgba(4,14,8,.82); border: 1px solid rgba(80,180,80,.2);
-            border-radius: 10px; padding: .5rem 1.1rem;
-            pointer-events: auto;
-        }
-        #pov-hud button {
-            padding: .3rem .9rem; font-size: .9rem;
-            background: rgba(20,60,20,.8); color: #c8f0a8;
-            border: 1px solid rgba(80,180,60,.3); border-radius: 6px; cursor: pointer;
-        }
-        #pov-hud button:hover { background: rgba(35,90,30,.9); }
-        #pov-gator-label {
-            color: #a8d890; font-size: 1rem; min-width: 160px; text-align: center;
-        }
-        #pov-close-btn {
-            position: absolute; top: .7rem; right: 1rem;
-            font-size: 1.3rem; background: rgba(20,60,20,.8); color: #c8f0a8;
-            border: 1px solid rgba(80,180,60,.3); border-radius: 6px;
-            padding: .2rem .7rem; cursor: pointer;
+        #pov-self-speech .pov-self-name {
+            font-size: .75rem;
+            font-weight: 700;
+            color: #78e890;
+            text-transform: uppercase;
+            letter-spacing: .05em;
+            margin-bottom: .2rem;
         }
     </style>
 </head>
@@ -248,8 +275,7 @@
         <div id="header">
             <h1>🐊 Swamp of Salem</h1>
             <div class="controls">
-                <button id="povToggleBtn" class="secondary">🐊 POV</button>
-                <button id="babylonPovToggleBtn" class="secondary">🦖 BabylonJSWebGPU</button>
+                <button id="babylonPovToggleBtn" class="secondary">🌊 Gator POV</button>
                 <button id="respawnBtn">↺ Respawn</button>
                 <button id="pauseBtn" class="secondary">⏸ Pause</button>
                 <button id="testConvBtn" class="secondary" title="Trigger a test conversation between two gators">🗨 Test Conv</button>
@@ -261,9 +287,6 @@
         </div>
 
         <div id="world">
-            <canvas id="renderCanvas" style="width:100%;height:100%;position:absolute;top:0;left:0;touch-action:none;"></canvas>
-            <div id="world-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;">
-                <!-- Chat bubbles, dead markers, and private enclosures are appended here -->
             <svg id="connections"></svg>
             <div id="night-overlay"></div>
             <div id="vote-tally" style="display:none"></div>
@@ -283,24 +306,20 @@
                 <button class="panel-close" id="panelCloseBtn" title="Close">✕</button>
                 <div id="gator-panel-content"></div>
             </aside>
-            </div>
         </div>
     </div>
 
-    <!-- 3D POV Overlay -->
-    <div id="pov-canvas-container">
-        <button id="pov-close-btn" title="Exit POV">✕ Exit POV</button>
-        <div id="pov-hud">
-            <button id="pov-prev-btn">◀</button>
-            <span id="pov-gator-label">🐊 —</span>
-            <button id="pov-next-btn">▶</button>
-        </div>
-    </div>
-
-    <!-- Babylon.js WebGPU POV Overlay -->
+    <!-- Babylon.js Gator POV Overlay -->
     <div id="babylon-pov-canvas-container">
         <button id="babylon-pov-close-btn" title="Exit Babylon POV">✕ Exit POV</button>
         <div id="babylon-engine-badge">Babylon.js · WebGPU</div>
+        <!-- Projected chat bubbles for other alligators -->
+        <div id="pov-bubble-layer"></div>
+        <!-- Self-speech: shown at the bottom when the POV gator is talking -->
+        <div id="pov-self-speech">
+            <div class="pov-self-name" id="pov-self-name"></div>
+            <div id="pov-self-text"></div>
+        </div>
         <div id="babylon-pov-hud">
             <button id="babylon-pov-prev-btn">◀</button>
             <span id="babylon-pov-gator-label">🐊 —</span>
@@ -560,52 +579,7 @@
             }
         }
 
-        // ── 3D POV Mode ──────────────────────────────────────────────────────
-        let pov3DActive = false;
-        let gator3dModule = null;
-
-        async function loadGator3D() {
-            if (!gator3dModule) {
-                gator3dModule = await import('./js/gator3d.js');
-            }
-            return gator3dModule;
-        }
-
-        document.getElementById('povToggleBtn').addEventListener('click', async () => {
-            if (pov3DActive) {
-                exitPOV();
-            } else {
-                await enterPOV();
-            }
-        });
-
-        document.getElementById('pov-close-btn').addEventListener('click', exitPOV);
-
-        document.getElementById('pov-next-btn').addEventListener('click', async () => {
-            const mod = await loadGator3D();
-            mod.nextGator();
-        });
-
-        document.getElementById('pov-prev-btn').addEventListener('click', async () => {
-            const mod = await loadGator3D();
-            mod.prevGator();
-        });
-
-        // Arrow keys cycle gators while in POV mode
-        document.addEventListener('keydown', async e => {
-            if (!pov3DActive) return;
-            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-                const mod = await loadGator3D();
-                mod.nextGator();
-            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-                const mod = await loadGator3D();
-                mod.prevGator();
-            } else if (e.key === 'Escape') {
-                exitPOV();
-            }
-        });
-
-        // ── Babylon.js WebGPU POV Mode ────────────────────────────────────────
+        // ── Babylon.js Gator POV Mode ──────────────────────────────────────────
         let babylonPovActive = false;
         let babylonModule = null;
 
@@ -662,28 +636,11 @@
             const container = document.getElementById('babylon-pov-canvas-container');
             container.style.display = 'none';
             babylonPovActive = false;
-            document.getElementById('babylonPovToggleBtn').textContent = '🦖 BabylonJSWebGPU';
+            document.getElementById('babylonPovToggleBtn').textContent = '🌊 Gator POV';
             if (babylonModule) {
                 babylonModule.destroyBabylon();
                 babylonModule = null;
             }
-        }
-
-        async function enterPOV() {
-            const container = document.getElementById('pov-canvas-container');
-            container.style.display = 'block';
-            pov3DActive = true;
-            document.getElementById('povToggleBtn').textContent = '🗺️ 2D';
-            const mod = await loadGator3D();
-            mod.init3D(container);
-        }
-
-        function exitPOV() {
-            const container = document.getElementById('pov-canvas-container');
-            container.style.display = 'none';
-            pov3DActive = false;
-            document.getElementById('povToggleBtn').textContent = '🐊 POV';
-            if (gator3dModule) gator3dModule.destroy3D();
         }
     </script>
 </body>

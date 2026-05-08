@@ -65,7 +65,8 @@ import {
     renderGator, renderAllGators, updateStats, updatePhaseLabel,
     updateHouseGuests, syncTalkLines,
     initTooltip, showTooltip, moveTooltip, hideTooltip,
-    pinTooltip, refreshPinnedTooltip, cleanPrivateChatBubbles
+    pinTooltip, refreshPinnedTooltip, cleanPrivateChatBubbles,
+    syncBabylonMeshes
 } from './rendering.js';
 import { requestDialog, requestFullConversation, requestVote, recordMemory, drainNextConvTurn, setTickFunction } from './agentQueue.js';
 
@@ -1074,6 +1075,9 @@ function spawnGators() {
 
     // Reset game state
     resetGameState();
+
+    // Sync Babylon.js 3D meshes with the new gator + house roster
+    try { syncBabylonMeshes(); } catch (e) { console.warn('[babylon] syncBabylonMeshes failed', e); }
 
     // Clear dead body markers from previous game
     document.querySelectorAll('.dead-marker').forEach(e => e.remove());
