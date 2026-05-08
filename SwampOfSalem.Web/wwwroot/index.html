@@ -8,6 +8,13 @@
     <base href="/" />
     <link rel="stylesheet" href="css/swamp-of-salem.css" />
     <link rel="icon" type="image/png" href="favicon.png" />
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js"
+      }
+    }
+    </script>
     <style>
         /* Splash screen styles */
         .splash-overlay {
@@ -103,6 +110,39 @@
             border: 1px solid rgba(60,140,60,.3); border-radius: 6px; cursor: pointer;
         }
         .btn-back:hover { background: rgba(30,65,28,.85); }
+
+        /* 3D POV overlay */
+        #pov-canvas-container {
+            display: none;
+            position: fixed; inset: 0; z-index: 100;
+            background: #000;
+        }
+        #pov-canvas-container canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+        #pov-hud {
+            position: absolute; bottom: 1.2rem; left: 50%; transform: translateX(-50%);
+            display: flex; align-items: center; gap: .8rem;
+            background: rgba(4,14,8,.82); border: 1px solid rgba(80,180,80,.2);
+            border-radius: 10px; padding: .5rem 1.1rem;
+            pointer-events: auto;
+        }
+        #pov-hud button {
+            padding: .3rem .9rem; font-size: .9rem;
+            background: rgba(20,60,20,.8); color: #c8f0a8;
+            border: 1px solid rgba(80,180,60,.3); border-radius: 6px; cursor: pointer;
+        }
+        #pov-hud button:hover { background: rgba(35,90,30,.9); }
+        #pov-gator-label {
+            color: #a8d890; font-size: 1rem; min-width: 160px; text-align: center;
+        }
+        #pov-close-btn {
+            position: absolute; top: .7rem; right: 1rem;
+            font-size: 1.3rem; background: rgba(20,60,20,.8); color: #c8f0a8;
+            border: 1px solid rgba(80,180,60,.3); border-radius: 6px;
+            padding: .2rem .7rem; cursor: pointer;
+        }
     </style>
 </head>
 
@@ -125,7 +165,9 @@
 
                     <div class="splash-buttons">
                         <button class="btn-primary" id="startGameBtn">▶ Start Game</button>
-
+                        <button class="btn-secondary" id="testAiBtn">🔌 Test AI</button>
+                        <button class="btn-secondary" id="testConvSplashBtn">🗨 Test Conv</button>
+                        <button class="btn-secondary" id="getGatorBtn">🐊 Get Gator</button>
                     </div>
                 </div>
                 <div id="splash-test" style="display:none">
@@ -162,9 +204,10 @@
         <div id="header">
             <h1>🐊 Swamp of Salem</h1>
             <div class="controls">
+                <button id="povToggleBtn" class="secondary">🐊 POV</button>
                 <button id="respawnBtn">↺ Respawn</button>
                 <button id="pauseBtn" class="secondary">⏸ Pause</button>
-                <button id="dialogModeBtn" class="secondary" title="Toggle between AI Agent dialog and local JS dialog">🤖 AI</button>
+                <button id="testConvBtn" class="secondary" title="Trigger a test conversation between two gators">🗨 Test Conv</button>
 
             </div>
             <div id="stats"></div>
@@ -192,6 +235,16 @@
                 <button class="panel-close" id="panelCloseBtn" title="Close">✕</button>
                 <div id="gator-panel-content"></div>
             </aside>
+        </div>
+    </div>
+
+    <!-- 3D POV Overlay -->
+    <div id="pov-canvas-container">
+        <button id="pov-close-btn" title="Exit POV">✕ Exit POV</button>
+        <div id="pov-hud">
+            <button id="pov-prev-btn">◀</button>
+            <span id="pov-gator-label">🐊 —</span>
+            <button id="pov-next-btn">▶</button>
         </div>
     </div>
 
@@ -277,7 +330,7 @@
         });
 
         // Test AI button
-        document.getElementById('testAiBtn').addEventListener('click', () => {
+        document.getElementById('testAiBtn')?.addEventListener('click', () => {
             document.getElementById('splash-main').style.display = 'none';
             document.getElementById('splash-test').style.display = 'block';
             chatMessages.length = 0;
@@ -291,7 +344,7 @@
         });
 
         // Test Conversation button — starts game then triggers a test conversation
-        document.getElementById('testConvSplashBtn').addEventListener('click', async () => {
+        document.getElementById('testConvSplashBtn')?.addEventListener('click', async () => {
             // Get the user-selected gator count
             const gatorCountInput = document.getElementById('gatorCountInput');
             let gatorCount = parseInt(gatorCountInput.value, 10);
@@ -336,7 +389,7 @@
         });
 
         // Get Gator button
-        document.getElementById('getGatorBtn').addEventListener('click', () => {
+        document.getElementById('getGatorBtn')?.addEventListener('click', () => {
             document.getElementById('splash-main').style.display = 'none';
             document.getElementById('splash-gator').style.display = 'block';
             generateGator();
@@ -445,6 +498,68 @@
                 document.getElementById('test-error').style.display = 'block';
                 addTestMsg(false, '❌ Connection failed — see error below.');
             }
+        }
+
+        // ── 3D POV Mode ──────────────────────────────────────────────────────
+        let pov3DActive = false;
+        let gator3dModule = null;
+
+        async function loadGator3D() {
+            if (!gator3dModule) {
+                gator3dModule = await import('./js/gator3d.js');
+            }
+            return gator3dModule;
+        }
+
+        document.getElementById('povToggleBtn').addEventListener('click', async () => {
+            if (pov3DActive) {
+                exitPOV();
+            } else {
+                await enterPOV();
+            }
+        });
+
+        document.getElementById('pov-close-btn').addEventListener('click', exitPOV);
+
+        document.getElementById('pov-next-btn').addEventListener('click', async () => {
+            const mod = await loadGator3D();
+            mod.nextGator();
+        });
+
+        document.getElementById('pov-prev-btn').addEventListener('click', async () => {
+            const mod = await loadGator3D();
+            mod.prevGator();
+        });
+
+        // Arrow keys cycle gators while in POV mode
+        document.addEventListener('keydown', async e => {
+            if (!pov3DActive) return;
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                const mod = await loadGator3D();
+                mod.nextGator();
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                const mod = await loadGator3D();
+                mod.prevGator();
+            } else if (e.key === 'Escape') {
+                exitPOV();
+            }
+        });
+
+        async function enterPOV() {
+            const container = document.getElementById('pov-canvas-container');
+            container.style.display = 'block';
+            pov3DActive = true;
+            document.getElementById('povToggleBtn').textContent = '🗺️ 2D';
+            const mod = await loadGator3D();
+            mod.init3D(container);
+        }
+
+        function exitPOV() {
+            const container = document.getElementById('pov-canvas-container');
+            container.style.display = 'none';
+            pov3DActive = false;
+            document.getElementById('povToggleBtn').textContent = '🐊 POV';
+            if (gator3dModule) gator3dModule.destroy3D();
         }
     </script>
 </body>

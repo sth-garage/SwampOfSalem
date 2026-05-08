@@ -105,6 +105,12 @@ export const state = {
     // ── Tie-revote ────────────────────────────────────────────────────────
     tieRevote:           false, // true when we are in a tiebreaker re-vote
     tieRevoteCandidates: [],    // Array<number> gator IDs that are tied; only these can be voted for
+
+    // ── Social graph ─────────────────────────────────────────────────────
+    // Cliques are groups of gators who spend significant time together.
+    // Used by debate speech generation to accuse/defend whole groups.
+    cliques: [],            // Array<{memberIds: number[]}> — detected social clusters.
+    noNewConversations: false, // When true, no new conversations can start (end-of-day lock).
 };
 
 // ── Reset helper — called on respawn ──────────────────────────
@@ -146,4 +152,6 @@ export function resetGameState() {
     state.tieRevote           = false;
     state.tieRevoteCandidates = [];
     state.privateChatBubbles = state.privateChatBubbles ?? new Map();
+    state.cliques              = [];
+    state.noNewConversations   = false;
 }

@@ -25,11 +25,10 @@ public static class GameConstants
 
     /// <summary>
     /// Maximum number of AI conversations that may run concurrently.
-    /// Each active conversation occupies one slot; new conversations are blocked until
-    /// a slot frees up. Increase to allow livelier multi-pair chatter; reduce to 1
-    /// to serialise all conversations (original behaviour).
+    /// The JS frontend enforces this via <c>state.activeConversation</c> — only one
+    /// conversation can be in flight at a time so the simulation stays readable.
     /// </summary>
-    public const int MaxConcurrentConversations = 2;
+    public const int MaxConcurrentConversations = 1;
 
     // ── Tick / timing ──────────────────────────────────────────────────────────────────
 

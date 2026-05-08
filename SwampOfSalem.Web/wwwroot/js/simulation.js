@@ -577,8 +577,8 @@ function tick() {
         if (next === 'talking') {
             const TALK_COOLDOWN_MS = 60_000;
             const now = Date.now();
-            // Don't start new conversations if the nightfall lock is active
-            if (!state.noNewConversations) {
+            // Don't start new conversations if one is already active (1-at-a-time lock)
+            if (!state.activeConversation) {
             const nearby = [...free]
                 .filter(id => id !== gator.id)
                 .map(id => state.gators.find(p => p.id === id))
@@ -632,7 +632,7 @@ function tick() {
                 free.delete(partner.id);
                 continue;
             }
-            } // end if (!state.noNewConversations)
+            } // end if (!state.activeConversation)
             const anyFree = [...free].filter(id => id !== gator.id).map(id => state.gators.find(p => p.id === id)).filter(Boolean);
             if (anyFree.length > 0) {
                 const target = anyFree
@@ -647,7 +647,7 @@ function tick() {
             next = 'moving';
         }
 
-        if (next === 'hosting' && !state.noNewConversations) {
+        if (next === 'hosting' && !state.activeConversation) {
         const TALK_COOLDOWN_MS = 60_000;
         const now = Date.now();
         const guest = [...free]
@@ -1185,7 +1185,7 @@ export function initSimulation(agentInterop, dialogSource) {
         }
     });
 
-    document.getElementById('testConvBtn').addEventListener('click', testConversation);
+    document.getElementById('testConvBtn')?.addEventListener('click', testConversation);
 
     window.addEventListener('resize', () => {
         const existing = document.getElementById('culdesac');
