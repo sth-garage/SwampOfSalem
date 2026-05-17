@@ -1,4 +1,23 @@
-﻿// ── Game Config ────────────────────────────────────────────────
+﻿/**
+ * @fileoverview gameConfig.js — Game constants bridge between C# and JavaScript.
+ *
+ * ALL tuning values for the simulation originate in the C# AppLogic project
+ * (GameConstants, PersonalityConstants, AppearanceConstants, RelationshipConstants)
+ * and are serialised to JSON by GameConfigProvider.GetConfigJson() at startup.
+ *
+ * The server injects this JSON into the HTML as:
+ *   window.GameConfig = <json>;
+ * before any ES module is loaded, so this module can safely destructure it
+ * and re-export every constant with the same name as the old hard-coded
+ * constants.js did — zero changes required in consuming modules.
+ *
+ * ⚠️  NEVER hard-code game values directly in JavaScript. Change the C# constants
+ *     and the new values will propagate here automatically on next page load.
+ *
+ * @module gameConfig
+ */
+
+// ── Game Config ────────────────────────────────────────────────
 // All constants are injected from C# (GameConfigProvider) into
 // window.GameConfig BEFORE this module is imported.
 // We destructure once at module load and re-export with the
@@ -10,8 +29,7 @@ if (!G) throw new Error('window.GameConfig must be set before importing gameConf
 // ── Scalars ───────────────────────────────────────────────────
 export const GATOR_SIZE           = G.GATOR_SIZE;
 export const GATOR_COUNT          = G.GATOR_COUNT;
-export const CONV_LIMIT_FOR_NIGHTFALL = G.CONV_LIMIT_FOR_NIGHTFALL;
-export const NIGHTFALL_DELAY_MS   = G.NIGHTFALL_DELAY_MS;
+export const MAX_CONCURRENT_CONVERSATIONS = G.MAX_CONCURRENT_CONVERSATIONS;
 export const TICK_MS               = G.TICK_MS;
 export const TALK_DIST             = G.TALK_DIST;
 export const TALK_STOP             = G.TALK_STOP;

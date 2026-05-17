@@ -1,7 +1,9 @@
 ﻿namespace SwampOfSalem.AppLogic.Constants;
 
 /// <summary>
-/// Personality-driven stats, weights, emoji, and behavior tuning.
+/// Personality-driven stat baselines, activity weights, behavioral tuning, and display data
+/// for all six alligator archetypes. All dictionaries are keyed by lower-case personality
+/// name string (e.g. cheerful) because they are serialised to JSON for JavaScript.
 /// </summary>
 public static class PersonalityConstants
 {

@@ -7,14 +7,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-	<PackageReference Include="Microsoft.SemanticKernel" Version="1.54.0" />
-	<PackageReference Include="System.ClientModel" Version="1.5.1" />
+	<PackageReference Include="Microsoft.SemanticKernel" Version="1.76.0" />
+	<PackageReference Include="System.ClientModel" Version="1.12.0" />
   </ItemGroup>
 
   <ItemGroup>
 	<ProjectReference Include="..\SwampOfSalem.Shared\SwampOfSalem.Shared.csproj" />
 	<ProjectReference Include="..\SwampOfSalem.SK\SwampOfSalem.SK.csproj" />
 	<ProjectReference Include="..\SwampOfSalem.AppLogic\SwampOfSalem.AppLogic.csproj" />
+	<ProjectReference Include="..\SwampOfSalem.Gators\SwampOfSalem.Gators.csproj" />
   </ItemGroup>
 
 </Project>

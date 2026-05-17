@@ -8,6 +8,10 @@
     <base href="/" />
     <link rel="stylesheet" href="css/swamp-of-salem.css" />
     <link rel="icon" type="image/png" href="favicon.png" />
+    <!-- Babylon.js (used only by the alligator POV mode) -->
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+    <script src="https://cdn.babylonjs.com/postProcessesLibrary/babylonjs.postProcess.min.js"></script>
     <style>
         /* Splash screen styles */
         .splash-overlay {
@@ -40,6 +44,32 @@
             border: 1px solid rgba(60,140,60,.3); border-radius: 8px; cursor: pointer;
         }
         .splash-buttons .btn-secondary:hover { background: rgba(30,65,28,.85); }
+        /* Gator count input */
+        .gator-count-container { 
+            display: flex; 
+            align-items: center; 
+            gap: 0.5rem; 
+            margin-bottom: 1rem;
+            justify-content: center;
+        }
+        .gator-count-container label { 
+            color: #8ab880; 
+            font-size: 0.9rem; 
+        }
+        .gator-count-container input[type="number"] {
+            width: 60px;
+            padding: 0.4rem 0.6rem;
+            font-size: 1rem;
+            background: rgba(10,30,10,.8);
+            color: #b8d8a8;
+            border: 1px solid rgba(60,140,60,.3);
+            border-radius: 6px;
+            text-align: center;
+        }
+        .gator-count-container input[type="number"]:focus {
+            outline: none;
+            border-color: rgba(80,180,60,.5);
+        }
         /* Test panel */
         .ai-test-panel { text-align: left; }
         .ai-test-panel h2 { font-size: 1.2rem; color: #a8d890; margin-bottom: .5rem; }
@@ -77,6 +107,113 @@
             border: 1px solid rgba(60,140,60,.3); border-radius: 6px; cursor: pointer;
         }
         .btn-back:hover { background: rgba(30,65,28,.85); }
+
+        /* Babylon.js POV overlay */
+        #babylon-pov-canvas-container {
+            display: none;
+            position: fixed; inset: 0; z-index: 101;
+            background: #000;
+        }
+        #babylon-pov-canvas-container canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+        #babylon-pov-hud {
+            position: absolute; bottom: 1.2rem; left: 50%; transform: translateX(-50%);
+            display: flex; align-items: center; gap: .8rem;
+            background: rgba(4,14,8,.82); border: 1px solid rgba(80,180,80,.2);
+            border-radius: 10px; padding: .5rem 1.1rem;
+            pointer-events: auto;
+        }
+        #babylon-pov-hud button {
+            padding: .3rem .9rem; font-size: .9rem;
+            background: rgba(20,60,20,.8); color: #c8f0a8;
+            border: 1px solid rgba(80,180,60,.3); border-radius: 6px; cursor: pointer;
+        }
+        #babylon-pov-hud button:hover { background: rgba(35,90,30,.9); }
+        #babylon-pov-gator-label {
+            color: #a8d890; font-size: 1rem; min-width: 160px; text-align: center;
+        }
+        #babylon-pov-close-btn {
+            position: absolute; top: .7rem; right: 1rem;
+            font-size: 1.3rem; background: rgba(20,60,20,.8); color: #c8f0a8;
+            border: 1px solid rgba(80,180,60,.3); border-radius: 6px;
+            padding: .2rem .7rem; cursor: pointer;
+        }
+        #babylon-engine-badge {
+            position: absolute; top: .7rem; left: 1rem;
+            font-size: .75rem; color: #6ad890;
+            background: rgba(4,14,8,.75); border: 1px solid rgba(60,140,60,.25);
+            border-radius: 6px; padding: .15rem .55rem;
+            pointer-events: none;
+        }
+
+        /* ── POV chat bubbles ── */
+        #pov-bubble-layer {
+            position: absolute; inset: 0;
+            pointer-events: none; z-index: 10;
+            overflow: hidden;
+        }
+        .pov-bubble {
+            position: absolute;
+            transform: translate(-50%, -100%);
+            background: rgba(8, 28, 10, 0.88);
+            border: 1px solid rgba(80, 200, 80, 0.35);
+            border-radius: 10px;
+            padding: .28rem .62rem;
+            max-width: 220px;
+            font-size: .82rem;
+            color: #d0f0b8;
+            text-align: center;
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.35;
+            pointer-events: none;
+            transition: opacity .25s;
+        }
+        .pov-bubble::after {
+            content: '';
+            position: absolute;
+            bottom: -7px; left: 50%; transform: translateX(-50%);
+            border: 7px solid transparent;
+            border-top-color: rgba(80, 200, 80, 0.35);
+            border-bottom: none;
+        }
+        .pov-bubble .pov-bubble-name {
+            display: block;
+            font-size: .70rem;
+            font-weight: 700;
+            color: #78e890;
+            margin-bottom: .15rem;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+        }
+        .pov-bubble-waiting { opacity: .6; font-style: italic; }
+
+        /* ── Self-speech bar at bottom ── */
+        #pov-self-speech {
+            position: absolute;
+            bottom: 5rem; left: 50%; transform: translateX(-50%);
+            width: min(640px, 90vw);
+            background: rgba(6, 20, 8, 0.92);
+            border: 1px solid rgba(100, 220, 100, 0.4);
+            border-radius: 12px;
+            padding: .5rem 1rem;
+            font-size: .92rem;
+            color: #d8f8c0;
+            text-align: center;
+            z-index: 11;
+            pointer-events: none;
+            display: none;
+        }
+        #pov-self-speech .pov-self-name {
+            font-size: .75rem;
+            font-weight: 700;
+            color: #78e890;
+            text-transform: uppercase;
+            letter-spacing: .05em;
+            margin-bottom: .2rem;
+        }
     </style>
 </head>
 
@@ -88,11 +225,17 @@
                 <h1>🐊 Swamp of Salem</h1>
                 <div id="splash-main">
                     <p class="splash-subtitle">A murder-mystery simulation powered by AI agents</p>
+                    <div class="gator-count-container">
+                        <label for="gatorCountInput">Number of Gators:</label>
+                        <input type="number" id="gatorCountInput" min="2" max="9" value="7" />
+                    </div>
+                    <div class="gator-count-container">
+                        <label for="nightfallMinutesInput">Minutes Before Nightfall:</label>
+                        <input type="number" id="nightfallMinutesInput" min="1" max="60" value="5" />
+                    </div>
+
                     <div class="splash-buttons">
                         <button class="btn-primary" id="startGameBtn">▶ Start Game</button>
-                        <button class="btn-secondary" id="testAiBtn">🔌 Test AI Connection</button>
-                        <button class="btn-secondary" id="getGatorBtn">🐊 Get Gator</button>
-                        <button class="btn-secondary" id="testConvSplashBtn">🧪 Test Conversation</button>
                     </div>
                 </div>
                 <div id="splash-test" style="display:none">
@@ -129,11 +272,11 @@
         <div id="header">
             <h1>🐊 Swamp of Salem</h1>
             <div class="controls">
+                <button id="babylonPovToggleBtn" class="secondary">🌊 Gator POV</button>
                 <button id="respawnBtn">↺ Respawn</button>
                 <button id="pauseBtn" class="secondary">⏸ Pause</button>
-                <button id="dialogModeBtn" class="secondary" title="Toggle between AI Agent dialog and local JS dialog">🤖 AI</button>
-                <button id="skipAiTurnsBtn" class="secondary" title="After the first AI line, skip remaining AI turns in a conversation">⏭ Skip AI turns: OFF</button>
-                <button id="testConvBtn" class="secondary" title="Two random gators have a test conversation">🧪 Test Conversation</button>
+                <button id="testConvBtn" class="secondary" title="Trigger a test conversation between two gators">🗨 Test Conv</button>
+
             </div>
             <div id="stats"></div>
             <div id="nightfall-timer" class="nightfall-timer"></div>
@@ -148,7 +291,12 @@
                 <div class="go-card">
                     <div class="go-title"></div>
                     <div class="go-body"></div>
+                    <div class="go-character-list">
+                        <h3 class="go-list-title">Character History</h3>
+                        <div id="go-characters"></div>
+                    </div>
                     <button id="goRestartBtn">↺ Play Again</button>
+                    <button id="goSummaryBtn" style="margin-top:.5rem;padding:.5rem 1.4rem;font-size:.9rem;background:rgba(20,55,20,.8);color:#b8e8a0;border:1px solid rgba(80,160,60,.4);border-radius:8px;cursor:pointer;">📄 Download Game Summary (PDF)</button>
                 </div>
             </div>
             <aside id="gator-panel" class="gator-panel" style="display:none">
@@ -156,6 +304,25 @@
                 <div id="gator-panel-content"></div>
             </aside>
         </div>
+    </div>
+
+    <!-- Babylon.js Gator POV Overlay -->
+    <div id="babylon-pov-canvas-container">
+        <button id="babylon-pov-close-btn" title="Exit Babylon POV">✕ Exit POV</button>
+        <div id="babylon-engine-badge">Babylon.js · WebGPU</div>
+        <!-- Projected chat bubbles for other alligators -->
+        <div id="pov-bubble-layer"></div>
+        <!-- Self-speech: shown at the bottom when the POV gator is talking -->
+        <div id="pov-self-speech">
+            <div class="pov-self-name" id="pov-self-name"></div>
+            <div id="pov-self-text"></div>
+        </div>
+        <div id="babylon-pov-hud">
+            <button id="babylon-pov-prev-btn">◀</button>
+            <span id="babylon-pov-gator-label">🐊 —</span>
+            <button id="babylon-pov-next-btn">▶</button>
+        </div>
+        <div id="pov-control-hint">WASD / ↑↓←→ move &nbsp;·&nbsp; drag or click+mouse look &nbsp;·&nbsp; Esc = follow</div>
     </div>
 
     <!-- Night Report Overlay -->
@@ -190,22 +357,57 @@
             }
         });
 
+        function getSelectedDialogSource() {
+            return 'Gator';
+        }
+
         // Start game button
         document.getElementById('startGameBtn').addEventListener('click', async () => {
+            // Get the user-selected gator count
+            const gatorCountInput = document.getElementById('gatorCountInput');
+            let gatorCount = parseInt(gatorCountInput.value, 10);
+
+            // Validate and clamp the value
+            if (isNaN(gatorCount) || gatorCount < 2) gatorCount = 2;
+            if (gatorCount > 9) gatorCount = 9;
+            gatorCountInput.value = gatorCount;
+
+            // Get the user-selected nightfall minutes
+            const nightfallInput = document.getElementById('nightfallMinutesInput');
+            let nightfallMinutes = parseInt(nightfallInput.value, 10);
+            if (isNaN(nightfallMinutes) || nightfallMinutes < 1) nightfallMinutes = 1;
+            if (nightfallMinutes > 60) nightfallMinutes = 60;
+            nightfallInput.value = nightfallMinutes;
+
             // Load game config from server and set on window BEFORE importing any JS modules
             const cfgResp = await fetch('/api/game-config');
             window.GameConfig = await cfgResp.json();
 
+            // Override GATOR_COUNT and DAY_TICKS with user selections
+            window.GameConfig.GATOR_COUNT = gatorCount;
+            window.GameConfig.DAY_TICKS = Math.round((nightfallMinutes * 60 * 1000) / window.GameConfig.TICK_MS);
+
             document.getElementById('splash').style.display = 'none';
-            const dialogSource = configData?.dialogSource ?? 'AI';
+            const dialogSource = getSelectedDialogSource();
+            const serverMode = dialogSource === 'Gator' ? 'RuleBased' : 'AI';
+            try {
+                await fetch('/api/dialog-source', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dialogSource: serverMode })
+                });
+                console.log(`[DialogSource] Mode set to: ${serverMode}`);
+            } catch (err) {
+                console.warn('[DialogSource] Failed to set mode:', err);
+            }
 
             // Dynamic import so gameConfig.js is not evaluated until window.GameConfig is ready
-            const { initSimulation } = await import('./js/main.js?v=2');
+            const { initSimulation } = await import('./js/main.js?v=4');
             initSimulation(null, dialogSource);
         });
 
         // Test AI button
-        document.getElementById('testAiBtn').addEventListener('click', () => {
+        document.getElementById('testAiBtn')?.addEventListener('click', () => {
             document.getElementById('splash-main').style.display = 'none';
             document.getElementById('splash-test').style.display = 'block';
             chatMessages.length = 0;
@@ -219,21 +421,52 @@
         });
 
         // Test Conversation button — starts game then triggers a test conversation
-        document.getElementById('testConvSplashBtn').addEventListener('click', async () => {
+        document.getElementById('testConvSplashBtn')?.addEventListener('click', async () => {
+            // Get the user-selected gator count
+            const gatorCountInput = document.getElementById('gatorCountInput');
+            let gatorCount = parseInt(gatorCountInput.value, 10);
+
+            // Validate and clamp the value
+            if (isNaN(gatorCount) || gatorCount < 2) gatorCount = 2;
+            if (gatorCount > 9) gatorCount = 9;
+            gatorCountInput.value = gatorCount;
+
+            // Get the user-selected nightfall minutes
+            const nightfallInput = document.getElementById('nightfallMinutesInput');
+            let nightfallMinutes = parseInt(nightfallInput.value, 10);
+            if (isNaN(nightfallMinutes) || nightfallMinutes < 1) nightfallMinutes = 1;
+            if (nightfallMinutes > 60) nightfallMinutes = 60;
+            nightfallInput.value = nightfallMinutes;
+
             const cfgResp = await fetch('/api/game-config');
             window.GameConfig = await cfgResp.json();
 
-            document.getElementById('splash').style.display = 'none';
-            const dialogSource = configData?.dialogSource ?? 'AI';
+            // Override GATOR_COUNT and DAY_TICKS with user selections
+            window.GameConfig.GATOR_COUNT = gatorCount;
+            window.GameConfig.DAY_TICKS = Math.round((nightfallMinutes * 60 * 1000) / window.GameConfig.TICK_MS);
 
-            const { initSimulation, testConversation } = await import('./js/main.js?v=2');
+            document.getElementById('splash').style.display = 'none';
+            const dialogSource = getSelectedDialogSource();
+            const serverMode = dialogSource === 'Gator' ? 'RuleBased' : 'AI';
+            try {
+                await fetch('/api/dialog-source', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dialogSource: serverMode })
+                });
+                console.log(`[DialogSource] Mode set to: ${serverMode}`);
+            } catch (err) {
+                console.warn('[DialogSource] Failed to set mode:', err);
+            }
+
+            const { initSimulation, testConversation } = await import('./js/main.js?v=4');
             initSimulation(null, dialogSource);
             // Wait for gators to spawn before triggering the conversation
             setTimeout(() => testConversation(), 2000);
         });
 
         // Get Gator button
-        document.getElementById('getGatorBtn').addEventListener('click', () => {
+        document.getElementById('getGatorBtn')?.addEventListener('click', () => {
             document.getElementById('splash-main').style.display = 'none';
             document.getElementById('splash-gator').style.display = 'block';
             generateGator();
@@ -341,6 +574,70 @@
                 document.getElementById('test-error').textContent = '⚠ ' + err.message;
                 document.getElementById('test-error').style.display = 'block';
                 addTestMsg(false, '❌ Connection failed — see error below.');
+            }
+        }
+
+        // ── Babylon.js Gator POV Mode ──────────────────────────────────────────
+        let babylonPovActive = false;
+        let babylonModule = null;
+
+        async function loadBabylonMod() {
+            if (!babylonModule) {
+                babylonModule = await import('./js/gatorBabylon.js?v=4');
+            }
+            return babylonModule;
+        }
+
+        document.getElementById('babylonPovToggleBtn').addEventListener('click', async () => {
+            if (babylonPovActive) {
+                exitBabylonPOV();
+            } else {
+                await enterBabylonPOV();
+            }
+        });
+
+        document.getElementById('babylon-pov-close-btn').addEventListener('click', exitBabylonPOV);
+
+        document.getElementById('babylon-pov-next-btn').addEventListener('click', async () => {
+            const mod = await loadBabylonMod();
+            mod.nextGator();
+        });
+
+        document.getElementById('babylon-pov-prev-btn').addEventListener('click', async () => {
+            const mod = await loadBabylonMod();
+            mod.prevGator();
+        });
+
+        document.addEventListener('keydown', async e => {
+            if (!babylonPovActive) return;
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                const mod = await loadBabylonMod();
+                mod.nextGator();
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                const mod = await loadBabylonMod();
+                mod.prevGator();
+            } else if (e.key === 'Escape') {
+                exitBabylonPOV();
+            }
+        });
+
+        async function enterBabylonPOV() {
+            const container = document.getElementById('babylon-pov-canvas-container');
+            container.style.display = 'block';
+            babylonPovActive = true;
+            document.getElementById('babylonPovToggleBtn').textContent = '🗺️ 2D';
+            const mod = await loadBabylonMod();
+            await mod.initBabylon(container);
+        }
+
+        function exitBabylonPOV() {
+            const container = document.getElementById('babylon-pov-canvas-container');
+            container.style.display = 'none';
+            babylonPovActive = false;
+            document.getElementById('babylonPovToggleBtn').textContent = '🌊 Gator POV';
+            if (babylonModule) {
+                babylonModule.destroyBabylon();
+                babylonModule = null;
             }
         }
     </script>
