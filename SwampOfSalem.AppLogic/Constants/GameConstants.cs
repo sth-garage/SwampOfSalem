@@ -165,6 +165,24 @@ public static class GameConstants
     /// </summary>
     public const int ConversationExtraTurns = 4;
 
+    // ── Movement bounds ──────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Maximum distance in simulation pixels that a gator may travel from the
+    /// centre of the canvas.  Gators wandering outside this radius are pushed
+    /// back toward the centre each tick, keeping them within the visible swamp.
+    /// 350 simulation pixels ≈ 350 ft at the default canvas scale.
+    /// </summary>
+    public const int TownRadiusGuard = 800;
+
+    /// <summary>
+    /// Radius of the circular ring on which houses are placed (simulation pixels).
+    /// Increase to spread houses further from the centre and give gators more
+    /// walking room between the house ring and the town boundary.
+    /// Capped at runtime by the canvas size so houses never go off-screen.
+    /// </summary>
+    public const int HouseRingRadius = 380;
+
     // ── Phase string constants (for JS interop) ────────────────────────────────────────
 
     /// <summary>

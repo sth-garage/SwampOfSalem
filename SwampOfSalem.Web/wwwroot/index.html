@@ -137,6 +137,12 @@
         #pov-hud-attack-btn:hover, #pov-hud-make-attack-btn:hover {
             background: rgba(110,30,20,.9);
         }
+        #pov-hud-influence-btn {
+            background: rgba(30,20,70,.85); border-color: rgba(140,80,220,.4); color: #d8c8f8;
+        }
+        #pov-hud-influence-btn:hover {
+            background: rgba(50,30,110,.9);
+        }
         #babylon-pov-gator-label {
             color: #a8d890; font-size: 1rem; min-width: 160px; text-align: center;
         }
@@ -353,8 +359,9 @@
                 <button id="babylonPovToggleBtn" class="secondary">🌊 Gator POV</button>
                 <button id="respawnBtn">↺ Respawn</button>
                 <button id="pauseBtn" class="secondary">⏸ Pause</button>
-                <button id="testConvBtn" class="secondary" title="Trigger a test conversation between two gators">🗨 Test Conv</button>
-
+                <button id="makeAttackBtn" class="secondary" title="Command an alligator to attack another">🦷 Make Attack</button>
+                <button id="influenceBtn" class="secondary" title="Influence a relationship between gators">🧠 Influence</button>
+                <button id="relDeltaToggleBtn" class="secondary rel-delta-toggle" title="Show relationship changes during conversation">💬 Rel. Changes: OFF</button>
             </div>
             <div id="stats"></div>
             <div id="nightfall-timer" class="nightfall-timer"></div>
@@ -363,6 +370,8 @@
 
         <div id="world">
             <svg id="connections"></svg>
+            <!-- Floating relationship-change labels (2D screen) -->
+            <div id="rel-delta-layer"></div>
             <div id="night-overlay"></div>
             <div id="vote-tally" style="display:none"></div>
             <div id="game-over-overlay" style="display:none">
@@ -401,6 +410,9 @@
             <button id="babylon-pov-next-btn">▶</button>
             <button id="pov-hud-attack-btn" title="Bite a gator">🦷 Attack</button>
             <button id="pov-hud-make-attack-btn" title="Order a gator to attack another">🎯 Make Attack</button>
+            <button id="pov-hud-influence-btn" title="Influence a gator's feelings toward another">🧠 Influence</button>
+            <button id="pov-hud-pause-btn" title="Pause / Resume POV simulation">⏸ Pause</button>
+            <button id="pov-hud-rel-delta-btn" class="rel-delta-toggle" title="Show relationship changes during conversation">💬 Rel: OFF</button>
         </div>
         <div id="pov-control-hint">drag to look &nbsp;·&nbsp; WASD move &nbsp;·&nbsp; Space jump &nbsp;·&nbsp; Esc = follow</div>
     </div>
@@ -706,6 +718,11 @@
         document.getElementById('pov-hud-make-attack-btn').addEventListener('click', async () => {
             const mod = await loadBabylonMod();
             mod.hudMakeAttack();
+        });
+
+        document.getElementById('pov-hud-influence-btn').addEventListener('click', async () => {
+            const mod = await loadBabylonMod();
+            mod.hudInfluence();
         });
 
         document.addEventListener('keydown', async e => {
