@@ -68,8 +68,9 @@ public static class PersonalityConstants
 
     public static readonly Dictionary<string, double> WalkSpeed = new()
     {
-        ["cheerful"] = 0.35, ["grumpy"] = 0.275, ["lazy"] = 0.165,
-        ["energetic"] = 0.60, ["introvert"] = 0.25, ["extrovert"] = 0.425
+        // Speeds reduced ~30% so gators move at a leisurely swamp pace.
+        ["cheerful"] = 0.24, ["grumpy"] = 0.19, ["lazy"] = 0.11,
+        ["energetic"] = 0.42, ["introvert"] = 0.17, ["extrovert"] = 0.30
     };
 
     public static readonly Dictionary<string, double> OrangeLoverChance = new()

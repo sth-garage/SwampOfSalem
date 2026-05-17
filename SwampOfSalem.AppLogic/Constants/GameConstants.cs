@@ -117,6 +117,54 @@ public static class GameConstants
     /// </summary>
     public const int ConvictionThreshold = 55;
 
+    // ── Bite / fight-or-flight ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Number of bites a gator can absorb before dying.
+    /// When a gator's <c>biteCount</c> reaches this threshold the engine calls
+    /// <c>_killFromBites(...)</c> and the gator is removed from the simulation.
+    /// </summary>
+    public const int BiteDeathThreshold = 5;
+
+    /// <summary>
+    /// Minimum duration in milliseconds that a bitten gator spends in the
+    /// panic-flee state before they are allowed to counter-attack or calm down.
+    /// Actual flee window = <see cref="BiteFleeMinMs"/> + random(0, <see cref="BiteFleeExtraMs"/>).
+    /// </summary>
+    public const int BiteFleeMinMs = 4000;
+
+    /// <summary>
+    /// Maximum additional milliseconds added randomly on top of <see cref="BiteFleeMinMs"/>
+    /// for the flee window duration (so each flee is slightly different).
+    /// </summary>
+    public const int BiteFleeExtraMs = 3000;
+
+    /// <summary>
+    /// Probability (0–1) that a bitten gator immediately counter-attacks once
+    /// the flee window expires.  The remaining (1 − probability) simply runs away.
+    /// </summary>
+    public const double BiteCounterChance = 0.45;
+
+    /// <summary>
+    /// Probability (0–1) that a gator who witnesses an action with no strong
+    /// opinion will side with the attacker.  Used for neutral witnesses in
+    /// the social fallout calculation when <c>listenerFeelsBiter</c> and
+    /// <c>listenerFeelsVictim</c> are both near zero.
+    /// </summary>
+    public const double NeutralWitnessSideWithAttackerChance = 0.5;
+
+    /// <summary>
+    /// Probability (0–1) that a gator who is a liar will flip a shared opinion
+    /// before passing it on to a listener.
+    /// </summary>
+    public const double LiarFlipChance = 0.4;
+
+    /// <summary>
+    /// Maximum additional turns added randomly to the base conversation turn count
+    /// (base is always 5; actual = 5 + random(0, ConversationExtraTurns)).
+    /// </summary>
+    public const int ConversationExtraTurns = 4;
+
     // ── Phase string constants (for JS interop) ────────────────────────────────────────
 
     /// <summary>

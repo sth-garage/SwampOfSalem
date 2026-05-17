@@ -131,6 +131,12 @@
             border: 1px solid rgba(80,180,60,.3); border-radius: 6px; cursor: pointer;
         }
         #babylon-pov-hud button:hover { background: rgba(35,90,30,.9); }
+        #pov-hud-attack-btn, #pov-hud-make-attack-btn {
+            background: rgba(70,20,20,.85); border-color: rgba(200,80,60,.4); color: #f0c8a8;
+        }
+        #pov-hud-attack-btn:hover, #pov-hud-make-attack-btn:hover {
+            background: rgba(110,30,20,.9);
+        }
         #babylon-pov-gator-label {
             color: #a8d890; font-size: 1rem; min-width: 160px; text-align: center;
         }
@@ -213,6 +219,78 @@
             text-transform: uppercase;
             letter-spacing: .05em;
             margin-bottom: .2rem;
+        }
+
+        /* Panel POV button */
+        .panel-pov-btn {
+            display: block;
+            width: 100%;
+            margin: .35rem 0 .55rem;
+            padding: .35rem .8rem;
+            font-size: .88rem;
+            background: rgba(20,65,20,.85);
+            color: #c0f0a0;
+            border: 1px solid rgba(80,180,60,.4);
+            border-radius: 7px;
+            cursor: pointer;
+            text-align: center;
+            transition: background .15s;
+        }
+        .panel-pov-btn:hover { background: rgba(35,95,30,.95); }
+
+        /* ── POV attack styles ─────────────────────────────────────────── */
+        /* Red-tinted "Attack!" button in the POV context menu */
+        .pov-ctx-attack {
+            color: #ff7070 !important;
+            border-color: rgba(200,40,40,.5) !important;
+            background: rgba(80,10,10,.7) !important;
+        }
+        .pov-ctx-attack:hover:not(:disabled) { background: rgba(120,15,15,.9) !important; }
+        .pov-ctx-attack:disabled { opacity: .45; cursor: not-allowed; }
+
+        /* Full-screen red vignette flash on bite */
+        .pov-bite-flash {
+            position: absolute; inset: 0;
+            background: radial-gradient(ellipse at center, rgba(180,0,0,.65) 0%, rgba(120,0,0,.85) 100%);
+            pointer-events: none;
+            opacity: 1;
+            transition: opacity .55s ease-out;
+            z-index: 120;
+            border-radius: inherit;
+        }
+
+        /* Screen-shake keyframe */
+        @keyframes pov-shake-kf {
+            0%   { transform: translate(0,0) rotate(0deg); }
+            15%  { transform: translate(-5px, 3px) rotate(-.8deg); }
+            30%  { transform: translate(6px,-3px) rotate(.6deg); }
+            50%  { transform: translate(-4px, 4px) rotate(-.5deg); }
+            70%  { transform: translate(3px,-2px) rotate(.4deg); }
+            100% { transform: translate(0,0) rotate(0deg); }
+        }
+        .pov-shake { animation: pov-shake-kf .35s ease-out; }
+
+        /* Toast notification shown after a bite */
+        .pov-bite-toast {
+            position: absolute;
+            top: 12%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(80,8,8,.92);
+            color: #ffaaaa;
+            border: 1px solid rgba(200,40,40,.5);
+            border-radius: 10px;
+            padding: .55rem 1.2rem;
+            font-size: .95rem;
+            font-weight: 600;
+            letter-spacing: .02em;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity .3s ease;
+            z-index: 121;
+            text-shadow: 0 1px 4px rgba(0,0,0,.8);
+            max-width: 80%;
+            text-align: center;
         }
     </style>
 </head>
@@ -321,8 +399,10 @@
             <button id="babylon-pov-prev-btn">◀</button>
             <span id="babylon-pov-gator-label">🐊 —</span>
             <button id="babylon-pov-next-btn">▶</button>
+            <button id="pov-hud-attack-btn" title="Bite a gator">🦷 Attack</button>
+            <button id="pov-hud-make-attack-btn" title="Order a gator to attack another">🎯 Make Attack</button>
         </div>
-        <div id="pov-control-hint">WASD / ↑↓←→ move &nbsp;·&nbsp; drag or click+mouse look &nbsp;·&nbsp; Esc = follow</div>
+        <div id="pov-control-hint">drag to look &nbsp;·&nbsp; WASD move &nbsp;·&nbsp; Space jump &nbsp;·&nbsp; Esc = follow</div>
     </div>
 
     <!-- Night Report Overlay -->
@@ -598,6 +678,16 @@
 
         document.getElementById('babylon-pov-close-btn').addEventListener('click', exitBabylonPOV);
 
+        // "View POV" button from the gator detail panel — enter POV for that specific gator
+        document.addEventListener('gator-pov-request', async e => {
+            const { gatorId } = e.detail;
+            if (!babylonPovActive) {
+                await enterBabylonPOV();
+            }
+            const mod = await loadBabylonMod();
+            mod.setActiveGatorById(gatorId);
+        });
+
         document.getElementById('babylon-pov-next-btn').addEventListener('click', async () => {
             const mod = await loadBabylonMod();
             mod.nextGator();
@@ -608,15 +698,21 @@
             mod.prevGator();
         });
 
+        document.getElementById('pov-hud-attack-btn').addEventListener('click', async () => {
+            const mod = await loadBabylonMod();
+            mod.hudAttack();
+        });
+
+        document.getElementById('pov-hud-make-attack-btn').addEventListener('click', async () => {
+            const mod = await loadBabylonMod();
+            mod.hudMakeAttack();
+        });
+
         document.addEventListener('keydown', async e => {
             if (!babylonPovActive) return;
-            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-                const mod = await loadBabylonMod();
-                mod.nextGator();
-            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-                const mod = await loadBabylonMod();
-                mod.prevGator();
-            } else if (e.key === 'Escape') {
+            // Arrow keys cycle gator only when not in manual-camera mode
+            // (manual mode uses arrow keys for movement via gatorBabylon.js)
+            if (e.key === 'Escape') {
                 exitBabylonPOV();
             }
         });

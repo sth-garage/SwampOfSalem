@@ -77,7 +77,16 @@ public static class GameConfigProvider
 
             // RelationshipConstants
             ["LIAR_CHANCE"] = RelationshipConstants.LiarChance,
-            ["COMPAT"] = RelationshipConstants.Compat
+            ["COMPAT"] = RelationshipConstants.Compat,
+
+            // Bite / fight-or-flight tuning
+            ["BITE_DEATH_THRESHOLD"]              = GameConstants.BiteDeathThreshold,
+            ["BITE_FLEE_MIN_MS"]                  = GameConstants.BiteFleeMinMs,
+            ["BITE_FLEE_EXTRA_MS"]                = GameConstants.BiteFleeExtraMs,
+            ["BITE_COUNTER_CHANCE"]               = GameConstants.BiteCounterChance,
+            ["NEUTRAL_WITNESS_SIDE_WITH_ATTACKER"]= GameConstants.NeutralWitnessSideWithAttackerChance,
+            ["LIAR_FLIP_CHANCE"]                  = GameConstants.LiarFlipChance,
+            ["CONVERSATION_EXTRA_TURNS"]          = GameConstants.ConversationExtraTurns,
         };
 
         return JsonSerializer.Serialize(config, JsonOptions);
