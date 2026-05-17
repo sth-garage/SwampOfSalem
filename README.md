@@ -29,8 +29,10 @@
 | [🗺️ docs/FRONTEND.md](docs/FRONTEND.md) | Every JS module explained, module dependency graph, the full `Person` object field reference, common patterns, debugging tips |
 | [⚙️ docs/BACKEND.md](docs/BACKEND.md) | All four .NET projects, API endpoint reference, Semantic Kernel agent lifecycle, prompt architecture, step-by-step guide to adding endpoints |
 | [🎮 docs/GAME_MECHANICS.md](docs/GAME_MECHANICS.md) | Full game cycle, phase reference, stats formulas, relations math, suspicion system, gossip spreading, murder victim algorithm, vote rules, personality archetypes, win conditions, tuning guide |
+| [📦 docs/CLASSES.md](docs/CLASSES.md) | Every C# class — purpose, key properties/methods, and how each one connects to the rest of the system |
 
 > 💡 **Reading order for new devs:** `README` → `ARCHITECTURE` → `GAME_MECHANICS` → `FRONTEND` or `BACKEND` depending on what you're working on.
+> 💡 **Per-project quick references:** Each project folder has its own `README.md` — [`SwampOfSalem.Shared`](SwampOfSalem.Shared/README.md), [`SwampOfSalem.AppLogic`](SwampOfSalem.AppLogic/README.md), [`SwampOfSalem.SK`](SwampOfSalem.SK/README.md), [`SwampOfSalem.Gators`](SwampOfSalem.Gators/README.md), [`SwampOfSalem.Web`](SwampOfSalem.Web/README.md).
 
 ---
 
