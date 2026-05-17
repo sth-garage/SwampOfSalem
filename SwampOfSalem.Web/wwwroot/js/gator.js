@@ -66,6 +66,9 @@ import {
 } from './helpers.js';
 import { state } from './state.js';
 
+// Minimum pixel gap from each wall — must match WALL_CLEAR in simulation.js.
+const WALL_CLEAR = 60;
+
 // ── Person factory ────────────────────────────────────────────
 /**
  * Creates a fully-initialised Person object for one alligator slot.
@@ -111,10 +114,10 @@ export function createGator(index, house) {
         homeIndex: index,  // Which house slot this gator owns (culde-sac index).
         indoors: false,    // true when gator is inside their house (hosting/visiting).
         guestOfIndex: null,// homeIndex of the house they're visiting, or null.
-        x: Math.max(0, Math.min(W, x)),  // Current pixel X (clamped to stage bounds).
-        y: Math.max(0, Math.min(H, y)),  // Current pixel Y.
-        targetX: house.doorX,            // Where the gator is moving toward.
-        targetY: house.doorY,
+        x: Math.max(WALL_CLEAR, Math.min(W - GATOR_SIZE - WALL_CLEAR, x)),  // Current pixel X (clamped inside walls).
+        y: Math.max(WALL_CLEAR, Math.min(H - GATOR_SIZE - WALL_CLEAR, y)),  // Current pixel Y.
+        targetX: Math.max(WALL_CLEAR, Math.min(W - GATOR_SIZE - WALL_CLEAR, house.doorX)),
+        targetY: Math.max(WALL_CLEAR, Math.min(H - GATOR_SIZE - WALL_CLEAR, house.doorY)),
 
         // ── Movement ───────────────────────────────────────────────────────
         speed: WALK_SPEED[personality], // Pixels per animation frame. Energetic gators move fast.
@@ -216,6 +219,7 @@ export function initRelations() {
         // Reset everything to clean neutral state.
         p.relations          = {};
         p.perceivedRelations = {};
+        p.fear               = {};
         p.met                = new Set(); // Clear any prior introductions.
 
         for (const q of state.gators) {
@@ -225,6 +229,8 @@ export function initRelations() {
             // Relations evolve through first-meeting introductions and drift.
             p.relations[q.id]          = 0;
             p.perceivedRelations[q.id] = 0;
+            // Fear starts at 0 and grows from hostile events.
+            p.fear[q.id]               = 0;
         }
     }
 }
@@ -348,5 +354,45 @@ export function socialWeights(gator) {
  * @returns {object[]} Filtered array of Person objects that are not in state.deadIds.
  */
 export function living() { return state.gators.filter(p => !state.deadIds.has(p.id)); }
+
+// ── Fear coalition nudges ──────────────────────────────────────
+/**
+ * At the start of the Debate phase, gators that mutually fear the same gator
+ * have their suspicion of that gator boosted — simulating a silent coalition.
+ * Also applies accumulated voteIntentNudge from bite observations.
+ *
+ * Called by phases.js:triggerDebate().
+ */
+export function applyFearCoalitionNudges() {
+    const alive = living();
+    for (const a of alive) {
+        // Consume voteIntentNudge from bite observations
+        if (a.voteIntentNudge) {
+            for (const [tidStr, nudge] of Object.entries(a.voteIntentNudge)) {
+                const tid = Number(tidStr);
+                a.suspicion[tid] = Math.min(100, (a.suspicion[tid] ?? 0) + nudge);
+            }
+            a.voteIntentNudge = {};
+        }
+        // Fear-coalition boost
+        for (const b of alive) {
+            if (b.id <= a.id) continue;
+            for (const target of alive) {
+                if (target.id === a.id || target.id === b.id) continue;
+                const aFear = a.fear[target.id] ?? 0;
+                const bFear = b.fear[target.id] ?? 0;
+                if (aFear >= 40 && bFear >= 40) {
+                    const nudge = (Math.min(aFear, bFear) / 100) * 15;
+                    a.suspicion[target.id] = Math.min(100, (a.suspicion[target.id] ?? 0) + nudge);
+                    b.suspicion[target.id] = Math.min(100, (b.suspicion[target.id] ?? 0) + nudge);
+                    a.history.push({ day: state.dayNumber, type: 'fear_coalition', with: b.id, about: target.id,
+                        detail: `${a.name} and ${b.name} both fear ${target.name} — suspicion raised together.` });
+                    b.history.push({ day: state.dayNumber, type: 'fear_coalition', with: a.id, about: target.id,
+                        detail: `${a.name} and ${b.name} both fear ${target.name} — suspicion raised together.` });
+                }
+            }
+        }
+    }
+}
 
 

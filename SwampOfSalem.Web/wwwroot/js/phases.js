@@ -39,7 +39,7 @@ import {
     DEBATE_SPEAK_COOLDOWN, PERSONALITY_EMOJI
 } from './gameConfig.js';
 import { rnd, rndF, speakDelayMs } from './helpers.js';
-import { living } from './gator.js';
+import { living, applyFearCoalitionNudges } from './gator.js';
 import { state } from './state.js';
 import { renderAllGators, updateStats, updatePhaseLabel, updateHouseGuests, showDeadBody } from './rendering.js';
 
@@ -361,7 +361,11 @@ export function triggerDebate() {
         recordMemory(p.id, state.dayNumber, 'debate_start', `Debate began. Most suspicious of ${suspect?.name || 'no one'}.`, suspect?.id ?? null);
     }
 
-    // Build the floor queue — randomise the first round so it's not always
+    // Apply fear-coalition vote nudges + voteIntentNudge from bite observations.
+    // applyFearCoalitionNudges() lives in gator.js to avoid circular imports.
+    applyFearCoalitionNudges();
+
+    // Build the floor queue
     // the same gator who opens the debate.
     state.debateSpeakerQueue   = alive.slice().sort(() => Math.random() - 0.5).map(p => p.id);
     state.debateSpeakerTimer   = 0;

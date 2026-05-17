@@ -416,6 +416,20 @@ button.secondary:hover { background: rgba(30, 65, 28, 0.85); }
 /* Hosting/visiting pair — full visibility, inside the enclosure bubble */
 .gator.indoors-private { opacity: 1; transform-origin: bottom center; z-index: 12; }
 
+/* ── Bite flash ──────────────────────────────────────────────── */
+/* Applied for ~3 s when a gator is bitten. Red tint pulses on the sprite. */
+@keyframes bitten-pulse {
+    0%   { filter: drop-shadow(0 0 0px rgba(255, 0, 0, 0));    }
+    15%  { filter: drop-shadow(0 0 12px rgba(255, 0, 0, 0.95)) brightness(1.6) saturate(2); }
+    40%  { filter: drop-shadow(0 0  6px rgba(255, 60, 60, 0.7)) brightness(1.3); }
+    70%  { filter: drop-shadow(0 0 10px rgba(255, 0, 0, 0.8))  brightness(1.5) saturate(2); }
+    100% { filter: drop-shadow(0 0 0px rgba(255, 0, 0, 0));    }
+}
+.gator.bitten-flash {
+    animation: bitten-pulse 0.55s ease-in-out 5 !important;
+    z-index: 20;
+}
+
 /* ── Private chat enclosure (lilypad bubble) ─────────────────── */
 .private-chat-enclosure {
     position: absolute;
@@ -1153,10 +1167,87 @@ button.secondary:hover { background: rgba(30, 65, 28, 0.85); }
     cursor: default;
 }
 
+/* Distinct tint for the Attack button so it stands out from social actions */
+.pov-ctx-attack {
+    color: #ff9090;
+}
+.pov-ctx-attack:hover:not([disabled]) {
+    background: rgba(180, 40, 40, .22);
+}
+
+/* Distinct tint for the Make Attack button — amber to show it's a manipulation action */
+.pov-ctx-make-attack {
+    color: #ffd080;
+}
+.pov-ctx-make-attack:hover:not([disabled]) {
+    background: rgba(160, 100, 10, .22);
+}
+
+/* Cancel Conversation button — grey-red to signal a negative/destructive action */
+.pov-ctx-cancel {
+    color: #e07070;
+    border-top: 1px solid rgba(255,255,255,.08);
+    margin-top: 2px;
+    padding-top: 5px;
+}
+.pov-ctx-cancel:hover {
+    background: rgba(140, 30, 30, .20);
+}
+
+/* ── Make Attack picker ── */
+/* A floating overlay that presents a two-step gator selection:
+   Step 1 — choose the attacker; Step 2 — choose the victim.
+   Appears centred at the top of the Babylon container. */
+.pov-make-attack-picker {
+    position: absolute;
+    z-index: 60;                                   /* above context menu (50) */
+    background: rgba(12, 22, 8, 0.97);
+    border: 1px solid rgba(200, 120, 20, 0.55);
+    border-radius: 10px;
+    padding: .4rem .35rem .35rem;
+    min-width: 200px;
+    max-width: 300px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.85);
+    backdrop-filter: blur(7px);
+    animation: ctxMenuPop .13s ease-out;           /* reuse existing pop keyframe */
+}
+.pov-picker-title {
+    font-size: .76rem;
+    font-weight: 700;
+    color: #ffc060;
+    padding: .1rem .5rem .35rem;
+    border-bottom: 1px solid rgba(200,120,20,.25);
+    margin-bottom: .25rem;
+    white-space: nowrap;
+}
+.pov-picker-btn {
+    display: block;
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: #e8d8a0;
+    font-size: .82rem;
+    text-align: left;
+    padding: .3rem .55rem;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background .12s;
+}
+.pov-picker-btn:hover {
+    background: rgba(200, 120, 20, .18);
+}
+/* Cancel button inside the picker gets a muted red tint */
+.pov-picker-cancel {
+    color: #ff9898;
+    border-top: 1px solid rgba(255,100,100,.15);
+    margin-top: .25rem;
+    padding-top: .4rem;
+}
+
 /* ── POV in-conversation response choices ── */
 .pov-choices {
     position: absolute;
-    bottom: 64px;
+    bottom: 9rem;   /* above the self-speech bar (5rem) and HUD (1.2rem) */
     left: 50%;
     transform: translateX(-50%);
     z-index: 55;
@@ -1171,8 +1262,8 @@ button.secondary:hover { background: rgba(30, 65, 28, 0.85); }
     animation: choicesPop .15s ease-out;
 }
 @keyframes choicesPop {
-    from { transform: translateX(-50%) scale(.9); opacity: 0; }
-    to   { transform: translateX(-50%) scale(1);  opacity: 1; }
+    from { transform: translateX(-50%) translateY(8px) scale(.9); opacity: 0; }
+    to   { transform: translateX(-50%) translateY(0)   scale(1);  opacity: 1; }
 }
 .pov-choices-label {
     font-size: .72rem;

@@ -1,75 +1,151 @@
 /**
  * @fileoverview gatorBabylon.js — First-person 3D alligator-POV view using Babylon.js + WebGPU.
  *
- * Renders the swamp world from the eye-level perspective of a chosen alligator
- * using the Babylon.js WebGPU engine. Falls back to WebGL if WebGPU is
- * unavailable. Scene content mirrors gator3d.js:
- *   - Green plane          : swamp floor
- *   - BoxBuilder           : houses
- *   - Cylinder meshes      : trees
- *   - Alligator body groups: other gators
+ * ════════════════════════════════════════════════════════════════════════
+ * PURPOSE
+ * ════════════════════════════════════════════════════════════════════════
+ * This module renders the swamp world from the eye-level perspective of a
+ * chosen alligator using the Babylon.js WebGPU engine.  It falls back to
+ * WebGL2 automatically if WebGPU is unavailable in the user's browser.
  *
- * Depends on window.BABYLON being available (loaded via CDN <script> tag).
- * Only READS simulation state — never mutates it.
+ * ════════════════════════════════════════════════════════════════════════
+ * DESIGN PRINCIPLES
+ * ════════════════════════════════════════════════════════════════════════
+ * • Read-only simulation state: this module READS state.gators[] but never
+ *   directly mutates it.  All side-effects (bites, conversations, etc.)
+ *   are delegated to simulation.js / agentQueue.js exports.
+ *
+ * • Decoupled 3D scene: the Babylon scene is a visual mirror of the 2D
+ *   canvas — positions are converted from 2D pixel-space to 3D world-space
+ *   at every render frame by syncGatorMeshes().
+ *
+ * • POV switching: the player can jump into any living gator's perspective.
+ *   `activeGatorIndex` tracks which gator is currently being viewed.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * CAMERA CONTROLS (while in POV mode)
+ * ════════════════════════════════════════════════════════════════════════
+ * • Right-click + drag up/down/left/right → look up/down/left/right
+ * • W / Arrow Up   → move forward
+ * • S / Arrow Down → move backward
+ * • A / Arrow Left → strafe left
+ * • D / Arrow Right → strafe right
+ * • Spacebar       → jump (short hop, ~2 ft; gravity brings you down immediately)
+ * • Escape         → exit POV mode and release pointer lock
+ *
+ * After MANUAL_RESUME_MS (4 seconds) of no input the camera re-attaches to
+ * the active gator's automatic follow position.
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * CONTEXT MENU (right-click / tap on another gator mesh)
+ * ════════════════════════════════════════════════════════════════════════
+ * Clicking another gator while in POV opens a small floating menu:
+ *   💬 Start Conversation — fires startPovConversation()
+ *   🦷 Attack!            — fires applyBiteEffect(povGator, target) directly
+ *   🎯 Make Attack…       — two-step picker: choose an attacker, then a victim;
+ *                           fires applyBiteEffect(attacker, victim)
+ *   👁 Switch POV         — changes activeGatorIndex to the clicked gator
+ *
+ * ════════════════════════════════════════════════════════════════════════
+ * SCENE CONTENTS
+ * ════════════════════════════════════════════════════════════════════════
+ * • Green plane     : swamp floor (flat, infinite-looking)
+ * • BoxBuilder      : house meshes (one per state.houses[])
+ * • Cylinder meshes : tree decorations
+ * • TransformNode groups: other alligator body parts (body + head cylinders)
  *
  * @module gatorBabylon
  */
 
 import { state } from './state.js';
 import { living } from './gator.js';
-import { startPovConversation } from './simulation.js';
+import { startPovConversation, cancelPovConversation, applyBiteEffect, commandAttack } from './simulation.js';
 import { setPovChoiceHandler } from './agentQueue.js';
+import { stageBounds } from './helpers.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────
+// SCALE converts 2D canvas pixel distances into Babylon world units.
+// The 2D canvas is ~1000 px wide; with SCALE=0.1 that maps to ~100 world-units.
 const SCALE  = 0.1;
+// Camera eye height in Babylon world units (≈ waist-high on the gator mesh).
 const CAM_H  = 2.7;
+// House mesh dimensions (world units) — must stay in sync with buildHouses().
 const HOUSE_W = 12;
 const HOUSE_H = 7;
 const HOUSE_D = 12;
 
 // ── Module state ───────────────────────────────────────────────────────────
 let engine, scene, camera;
+// gatorMeshes maps each living gator's numeric ID to a Babylon TransformNode
+// that parents their body and head sub-meshes.
 let gatorMeshes  = new Map(); // gatorId → BABYLON.TransformNode (parent)
-let houseMeshes  = [];
-let initialized  = false;
-let activeGatorIndex = 0;
-let _canvas = null;
+let houseMeshes  = [];        // One Babylon Mesh per entry in state.houses[].
+let initialized  = false;     // Whether initBabylonPOV() has run at least once.
+let activeGatorIndex = 0;     // Index into living() array for the POV gator.
+let _canvas = null;           // The <canvas> element the Babylon engine draws into.
 
-// ── Free-camera (WASD / arrow / mouse) ─────────────────────────────────────
-// When the user touches any input key or drags the mouse the camera detaches
-// from the auto-follow logic.  It reverts to gator-follow after
-// MANUAL_RESUME_MS of inactivity OR when the user presses Escape.
-const MANUAL_RESUME_MS = 4000;
-const FREE_CAM_SPEED   = 12;   // world units per second for keyboard
-const MOUSE_SENSITIVITY = 0.0020; // radians per pixel
+// ── Free-camera constants ──────────────────────────────────────────────────
+// The camera has two modes:
+//   AUTO-FOLLOW: camera smoothly tracks the active gator's position.
+//   MANUAL:      player is directly controlling look / movement.
+// It switches to MANUAL on any keypress or mouse drag and returns to
+// AUTO-FOLLOW after MANUAL_RESUME_MS of inactivity (or pressing Escape).
+const MANUAL_RESUME_MS  = 4000;    // ms of inactivity before auto-follow resumes
+const FREE_CAM_SPEED    = 12;      // world units per second for WASD movement
+const MOUSE_SENSITIVITY = 0.0020;  // radians of camera rotation per pixel dragged
+const JUMP_FORCE        = 3.5;     // initial upward velocity applied at jump (world units/sec) — ~2 ft hop
+const GRAVITY           = 18;      // downward acceleration rate (world units/sec²)
 
-const _keys = new Set();         // currently held keys
-let _manualYaw   = 0;           // radians — horizontal look
-let _manualPitch = 0;           // radians — vertical look
+const _keys = new Set();         // Set of KeyboardEvent.code strings currently held down.
+let _manualYaw   = 0;            // Current horizontal camera angle (radians).
+let _manualPitch = 0;            // Current vertical camera angle (radians; clamped to ±70°).
 let _manualActive   = false;    // true while user is in control
 let _manualTimer    = 0;        // setTimeout handle
 let _mouseDown      = false;
+let _wasDragging    = false;  // true if the right-drag moved enough to suppress the next left-click
 let _lastMouseX     = 0;
 let _lastMouseY     = 0;
+let _jumpY          = 0;        // current extra height from a jump
+let _jumpVelocity   = 0;        // current vertical velocity (world units/sec)
+let _ctxMenu        = null;     // the active POV right-click context menu DOM node
+function _dismissCtxMenu() { if (_ctxMenu) { _ctxMenu.remove(); _ctxMenu = null; } }
+// Attack cooldown: one bite per 5 seconds (shared by context menu and HUD buttons)
+let _lastBiteMs         = 0;
+const BITE_COOLDOWN_MS  = 5000;
 
 function _enterManual() {
     _manualActive = true;
     clearTimeout(_manualTimer);
-    _manualTimer = setTimeout(_exitManual, MANUAL_RESUME_MS);
+    // Manual mode is permanent — the camera never auto-reverts to following the sim gator.
     const hint = document.getElementById('pov-control-hint');
     if (hint) hint.style.opacity = '1';
 }
 
 function _exitManual() {
-    _manualActive = false;
-    const hint = document.getElementById('pov-control-hint');
-    if (hint) hint.style.opacity = '0';
-    if (document.pointerLockElement === _canvas) document.exitPointerLock();
+    // No-op: manual mode is now permanent once entered.
+    // Keeping this function to avoid breaking any call sites.
 }
 
 function _onKeyDown(e) {
     if (!initialized) return;
     const k = e.key.toLowerCase();
+
+    // Spacebar jump
+    if (k === ' ') {
+        e.preventDefault();
+        if (_jumpY === 0 && _jumpVelocity === 0) { // only jump when grounded
+            if (camera && !_manualActive) {
+                // Seed look direction so the camera doesn't snap on first manual frame
+                const fwd = camera.getTarget().subtract(camera.position);
+                _manualYaw   = Math.atan2(fwd.x, fwd.z);
+                _manualPitch = Math.atan2(fwd.y, Math.sqrt(fwd.x * fwd.x + fwd.z * fwd.z));
+            }
+            _jumpVelocity = JUMP_FORCE;
+            _enterManual();
+        }
+        return;
+    }
+
     const isMove = ['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k);
     if (!isMove) { if (k === 'escape') _exitManual(); return; }
     e.preventDefault();
@@ -91,13 +167,14 @@ function _onKeyUp(e) {
 
 function _onMouseDown(e) {
     if (!initialized) return;
-    if (e.button !== 2) return;
+    if (e.button !== 2) return; // right-drag to look
     const container = _canvas && _canvas.parentElement;
     if (container && !container.contains(e.target)) return;
     _mouseDown = true;
+    _wasDragging = false;  // fresh drag — reset suppression flag
     _lastMouseX = e.clientX;
     _lastMouseY = e.clientY;
-    // Seed yaw/pitch from live camera direction so there is no jump
+    // Seed yaw/pitch from live camera direction so there is no snap
     if (camera) {
         const fwd = camera.getTarget().subtract(camera.position);
         _manualYaw   = Math.atan2(fwd.x, fwd.z);
@@ -105,13 +182,14 @@ function _onMouseDown(e) {
     }
     _enterManual();
     e.preventDefault();
-    // Pointer capture keeps move events coming even when the cursor leaves the canvas
+    // Pointer capture keeps move events coming even when cursor leaves the canvas
     try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
 }
 
 function _onMouseUp(e) {
     if (e.button !== 2) return;
     _mouseDown = false;
+    // Keep _wasDragging true — it will be consumed and cleared by the click handler
     try { e.target.releasePointerCapture(e.pointerId); } catch (_) {}
 }
 
@@ -123,14 +201,34 @@ function _onMouseMove(e) {
     _lastMouseX = e.clientX;
     _lastMouseY = e.clientY;
     if (dx === 0 && dy === 0) return;
-    _manualYaw   -= dx * MOUSE_SENSITIVITY;
-    _manualPitch += dy * MOUSE_SENSITIVITY; // inverted Y: drag down = look down
+    // Any movement > 2px suppresses the next click so gators aren't selected during look-drag
+    if (Math.abs(dx) + Math.abs(dy) > 2) _wasDragging = true;
+    // drag right → look right (+yaw);  drag up (negative dy) → look up (+pitch)
+    _manualYaw   += dx * MOUSE_SENSITIVITY;
+    _manualPitch -= dy * MOUSE_SENSITIVITY;
     _manualPitch  = Math.max(-1.3, Math.min(1.3, _manualPitch));
     _enterManual();
+    // Keep the POV gator mesh facing the camera look direction during right-drag
+    _syncPovGatorFacing();
 }
 
 function _onPointerLockChange() {
     // No-op: pointer lock is not used for right-drag look
+}
+
+/**
+ * When the player right-drags to turn the camera, also rotate the POV gator mesh
+ * so the avatar faces the same direction the player is looking.
+ * Only applies in manual-camera mode; auto-follow uses movement direction instead.
+ */
+function _syncPovGatorFacing() {
+    const alive = living();
+    const gator = alive[activeGatorIndex % Math.max(alive.length, 1)] ?? null;
+    if (!gator) return;
+    const meshData = gatorMeshes.get(gator.id);
+    if (!meshData) return;
+    // _manualYaw is the camera look angle in radians; reuse directly for the mesh
+    meshData.root.rotation.y = _manualYaw;
 }
 
 /**
@@ -158,6 +256,26 @@ function _applyManualCamera(dt) {
         camera.position.x += moveX * sp;
         camera.position.z += moveZ * sp;
         _enterManual(); // keep timer alive while moving
+
+        // Write camera position back to the gator's simulation coordinates so
+        // the 2D overlay and other gators track the player's position correctly.
+        const alive = living();
+        const activeGator = alive[activeGatorIndex % Math.max(alive.length, 1)] ?? null;
+        if (activeGator) {
+            // Convert Babylon world units → sim pixels (SCALE = 0.1)
+            const rawSimX = camera.position.x / SCALE;
+            const rawSimZ = camera.position.z / SCALE;
+            // Clamp to wall-safe area
+            const { W: sW, H: sH } = stageBounds();
+            const WCLEAR = 60;
+            activeGator.x = Math.max(WCLEAR, Math.min(sW - WCLEAR, rawSimX));
+            activeGator.y = Math.max(WCLEAR, Math.min(sH - WCLEAR, rawSimZ));
+            activeGator.targetX = activeGator.x;
+            activeGator.targetY = activeGator.y;
+            // Clamp camera back if we hit the wall
+            camera.position.x = activeGator.x * SCALE;
+            camera.position.z = activeGator.y * SCALE;
+        }
     }
 
     // Build look-at target from yaw + pitch
@@ -781,19 +899,55 @@ function getOrCreateGatorMesh(gator) {
     tail.material = bodyMat;
     tail.parent = root;
 
-    // Floating name label (above head)
+    // Floating name label (above head) — billboard plane with drawn text
+    const labelW = 2.2, labelH = 0.55;
     const label = BABYLON.MeshBuilder.CreatePlane(`label${gator.id}`,
-        { width: 1.4, height: 0.45 }, scene);
-    label.position = new BABYLON.Vector3(0, 3.2, 0);
+        { width: labelW, height: labelH }, scene);
+    label.position = new BABYLON.Vector3(0, 3.55, 0);
     label.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+    label.renderingGroupId = 1;   // draw on top of most geometry
+
+    const texW = 256, texH = 64;
+    const nameTex = new BABYLON.DynamicTexture(`ntex${gator.id}`, { width: texW, height: texH }, scene, false);
+    nameTex.hasAlpha = true;
+    const ctx = nameTex.getContext();
+
+    // Background pill — semi-transparent dark
+    ctx.clearRect(0, 0, texW, texH);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    const r = 14;
+    ctx.beginPath();
+    ctx.moveTo(r, 0); ctx.lineTo(texW - r, 0);
+    ctx.arcTo(texW, 0, texW, r, r);
+    ctx.lineTo(texW, texH - r);
+    ctx.arcTo(texW, texH, texW - r, texH, r);
+    ctx.lineTo(r, texH);
+    ctx.arcTo(0, texH, 0, texH - r, r);
+    ctx.lineTo(0, r);
+    ctx.arcTo(0, 0, r, 0, r);
+    ctx.closePath();
+    ctx.fill();
+
+    // Name text
+    const accentHex = `rgb(${Math.round(accent.r*255)},${Math.round(accent.g*255)},${Math.round(accent.b*255)})`;
+    ctx.fillStyle = accentHex;
+    ctx.font = 'bold 28px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gator.name, texW / 2, texH / 2);
+    nameTex.update();
+
     const labelMat = new BABYLON.StandardMaterial(`lmat${gator.id}`, scene);
-    labelMat.emissiveColor = accent;
-    labelMat.diffuseColor  = accent;
+    labelMat.diffuseTexture  = nameTex;
+    labelMat.emissiveTexture = nameTex;
+    labelMat.emissiveColor   = new BABYLON.Color3(1, 1, 1);
     labelMat.disableLighting = true;
+    labelMat.useAlphaFromDiffuseTexture = true;
+    labelMat.backFaceCulling = false;
     label.material = labelMat;
     label.parent = root;
 
-    const meshData = { root, headPivot, legL, legR, armL, armR, walkPhase: Math.random() * Math.PI * 2 };
+    const meshData = { root, headPivot, legL, legR, armL, armR, walkPhase: Math.random() * Math.PI * 2, bodyMat };
     gatorMeshes.set(gator.id, meshData);
     return meshData;
 }
@@ -913,9 +1067,13 @@ function updateCamera() {
         camera.setTarget(new window.BABYLON.Vector3(lookX, CAM_H * 0.85, lookZ));
     }
 
-    // Hide active gator's own mesh
+    // Hide active gator's own mesh (only disable living gators — dead ones already sit below ground)
+    const aliveIds = new Set(living().map(g => g.id));
     gatorMeshes.forEach((data, id) => {
-        data.root.setEnabled(id !== gator.id);
+        // Always show dead gators (their meshes sit below ground so they are harmless)
+        // Only hide the mesh for the gator whose POV is currently active
+        const isDead = !aliveIds.has(id);
+        data.root.setEnabled(isDead || id !== gator.id);
     });
 }
 
@@ -1064,7 +1222,8 @@ export async function initBabylon(container) {
     // Single-click on the canvas: show context menu for the nearest alligator
     _canvas.addEventListener('click', e => {
         if (!initialized) return;
-        // Ignore if this click was a drag-end from mouse-look
+        // Ignore if a right-drag look-around just finished (suppresses accidental selection)
+        if (_wasDragging) { _wasDragging = false; return; }
         if (_mouseDown) return;
         const alive = living();
         if (alive.length < 2) return;
@@ -1072,18 +1231,12 @@ export async function initBabylon(container) {
         const rect  = _canvas.getBoundingClientRect();
         const hit   = _pickGatorAtScreen(e.clientX - rect.left, e.clientY - rect.top, 80, curId);
         if (hit) _showCtxMenu(e.clientX, e.clientY, hit.gator, hit.idx);
-        else _dismissCtxMenu();
+        // clicking empty space leaves any open menu visible
     });
 
     // Suppress the browser context menu on right-click so right-drag look works cleanly
     _canvas.addEventListener('contextmenu', e => e.preventDefault());
-
-    // ── POV context menu ────────────────────────────────────────────────────────
-    let _ctxMenu = null;
-
-    function _dismissCtxMenu() {
-        if (_ctxMenu) { _ctxMenu.remove(); _ctxMenu = null; }
-    }
+    // ── POV context menu (vars at module scope so destroyBabylon can dismiss) ──
 
     /**
      * Project all living (non-POV) gator heads to screen space and return the one
@@ -1112,6 +1265,24 @@ export async function initBabylon(container) {
         return bestIdx === -1 ? null : { gator: living()[bestIdx], idx: bestIdx };
     }
 
+    /**
+     * Shows the POV interaction context menu near the clicked gator.
+     *
+     * Called when the user clicks on another gator's mesh while in POV mode.
+     * Releases pointer lock so the player can move the mouse to the menu items.
+     * The menu is auto-dismissed the next time the user clicks anywhere outside it.
+     *
+     * MENU ITEMS:
+     *   💬 Start Conversation — only enabled when no other AI conversation is running.
+     *   🦷 Attack!            — only enabled when outside the bite cooldown window.
+     *   🎯 Make Attack…       — same cooldown gate; opens a two-step gator picker.
+     *   👁 Switch POV         — always enabled; moves activeGatorIndex to clicked gator.
+     *
+     * @param {number} clientX      - Mouse X position (relative to viewport).
+     * @param {number} clientY      - Mouse Y position (relative to viewport).
+     * @param {object} targetGator  - The gator whose mesh was clicked.
+     * @param {number} targetIdx    - The index of targetGator in the living() array.
+     */
     function _showCtxMenu(clientX, clientY, targetGator, targetIdx) {
         _dismissCtxMenu();
         // Release pointer lock so the user can click menu items
@@ -1120,13 +1291,25 @@ export async function initBabylon(container) {
         const container = _canvas?.parentElement;
         if (!container) return;
 
+        const alive    = living();
+        // Determine which gator the player is currently viewing.
+        // We mod by alive.length to guard against index staleness after a death.
+        const povGator = alive[activeGatorIndex % Math.max(alive.length, 1)] ?? null;
+        // Only allow new conversations when no AI call is already in progress.
         const canConverse = !state.activeConversation && !state.noNewConversations;
+        // Only allow attacks once the cooldown period has elapsed.
+        const canAttack   = (Date.now() - _lastBiteMs) >= BITE_COOLDOWN_MS;
+
         const menu = document.createElement('div');
         menu.className = 'pov-context-menu';
         menu.innerHTML = `
             <div class="pov-ctx-title">🐊 ${targetGator.name}</div>
             <button class="pov-ctx-btn" id="pov-ctx-conv"${canConverse ? '' : ' disabled'}>💬 Start Conversation</button>
-            <button class="pov-ctx-btn" id="pov-ctx-switch">👁 Switch POV</button>`;
+            <button class="pov-ctx-btn pov-ctx-cancel" id="pov-ctx-cancel-conv" style="display:none">❌ Cancel Conversation</button>
+            <button class="pov-ctx-btn pov-ctx-attack" id="pov-ctx-attack"${canAttack ? '' : ' disabled'} title="${canAttack ? 'Bite this gator!' : 'Cooling down…'}">🦷 Attack!</button>
+            <button class="pov-ctx-btn pov-ctx-make-attack" id="pov-ctx-make-attack"${canAttack ? '' : ' disabled'} title="${canAttack ? 'Order another gator to attack' : 'Cooling down…'}">🎯 Make Attack…</button>
+            <button class="pov-ctx-btn" id="pov-ctx-switch">👁 Switch POV</button>
+            <button class="pov-ctx-btn pov-ctx-close" id="pov-ctx-close">✖ Close</button>`;
 
         // Position near cursor, clamped inside container
         const cRect = container.getBoundingClientRect();
@@ -1147,12 +1330,56 @@ export async function initBabylon(container) {
             menu.style.top  = `${Math.max(4, top)}px`;
         });
 
-        menu.querySelector('#pov-ctx-conv').addEventListener('click', e => {
+        // Show / hide conv vs cancel buttons based on whether a conversation is active
+        const cancelBtn = menu.querySelector('#pov-ctx-cancel-conv');
+        const convBtn   = menu.querySelector('#pov-ctx-conv');
+        if (state.activeConversation) {
+            convBtn.style.display   = 'none';
+            cancelBtn.style.display = '';
+        }
+
+        convBtn.addEventListener('click', e => {
             e.stopPropagation();
             _dismissCtxMenu();
-            const alive = living();
-            const povGator = alive[activeGatorIndex % Math.max(alive.length, 1)] ?? null;
             startPovConversation(povGator, targetGator);
+        });
+
+        cancelBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            _dismissCtxMenu();
+            cancelPovConversation(povGator, targetGator);
+        });
+
+        menu.querySelector('#pov-ctx-attack').addEventListener('click', e => {
+            e.stopPropagation();
+            _dismissCtxMenu();
+            if (!povGator) return;
+
+            _lastBiteMs = Date.now();
+            const result = applyBiteEffect(povGator.id, targetGator.id);
+            if (!result) return;
+
+            // Visual feedback
+            _triggerBiteFlash(container);
+
+            // Brief on-screen toast so the player knows the social fallout
+            const witnessText = result.witnessCount > 0
+                ? ` ${result.witnessCount} gator${result.witnessCount > 1 ? 's' : ''} witnessed it.`
+                : ' Nobody saw.';
+            _showBiteToast(container, `🦷 You bit ${targetGator.name}!${witnessText}`);
+        });
+
+        // ── Make Attack button ────────────────────────────────────────────────
+        // "Make Attack" lets the player *order* another living gator to attack a
+        // specific target.  Clicking it opens a two-step inline picker:
+        //   Step 1: choose the attacker (any living gator except the POV gator itself)
+        //   Step 2: choose the victim   (any living gator except the chosen attacker)
+        // Once both are selected, applyBiteEffect(attacker, victim) fires with the
+        // same social consequences as a natural bite, plus a toast describing what happened.
+        menu.querySelector('#pov-ctx-make-attack').addEventListener('click', e => {
+            e.stopPropagation();
+            if (!povGator) return;
+            _showMakeAttackPicker(container, povGator, targetGator);
         });
 
         menu.querySelector('#pov-ctx-switch').addEventListener('click', e => {
@@ -1161,11 +1388,16 @@ export async function initBabylon(container) {
             activeGatorIndex = targetIdx;
         });
 
-        // Dismiss on next outside click
-        setTimeout(() => {
-            window.addEventListener('click', _dismissCtxMenu, { once: true, capture: true });
-        }, 0);
+        menu.querySelector('#pov-ctx-close').addEventListener('click', e => {
+            e.stopPropagation();
+            _dismissCtxMenu();
+        });
+
+        // Menu stays open until the user picks an action or clicks ✖ Close
     }   // end _showCtxMenu
+
+    // Enter manual mode immediately — the user always drives the camera in POV.
+    _manualActive = true;
 
     engine.runRenderLoop(() => {
         if (!scene) return;
@@ -1173,11 +1405,23 @@ export async function initBabylon(container) {
         if (state.gators.length > 0) {
             const dt = engine.getDeltaTime() / 1000;
             syncGatorMeshes(dt);
+
+            // ── Jump physics (independent of manual vs auto-follow) ──────────
+            if (_jumpVelocity !== 0 || _jumpY > 0) {
+                _jumpVelocity -= GRAVITY * dt;
+                _jumpY += _jumpVelocity * dt;
+                if (_jumpY < 0) { _jumpY = 0; _jumpVelocity = 0; }
+            }
+
             if (_manualActive) {
                 _applyManualCamera(dt);
             } else {
                 updateCamera();
             }
+
+            // Apply jump height on top of whatever the camera system set Y to
+            if (_jumpY > 0) camera.position.y += _jumpY;
+
             const alive = living();
             const activeGator = alive[activeGatorIndex % Math.max(alive.length, 1)] ?? null;
             // Keep shared state in sync so simulation.js can skip this gator for conversations
@@ -1243,12 +1487,144 @@ function _dismissPovChoices() {
     if (_choicePanel) { _choicePanel.remove(); _choicePanel = null; }
 }
 
+// ── Bite flash/toast state (module-scope so destroyBabylon + hudAttack can reach them) ──
+let _biteFlashEl    = null;
+let _biteFlashTimer = null;
+let _biteToastEl    = null;
+let _biteToastTimer = null;
+
+/** Flash the VICTIM gator's body mesh red for ~600 ms — no overlay change. */
+function flashGatorRed(gatorId) {
+    const data = gatorMeshes.get(gatorId);
+    if (!data?.bodyMat) return;
+    const BABYLON = window.BABYLON;
+    const originalDiffuse = data.bodyMat.diffuseColor.clone();
+    data.bodyMat.diffuseColor  = new BABYLON.Color3(1, 0.05, 0.05);
+    data.bodyMat.emissiveColor = new BABYLON.Color3(0.8, 0, 0);
+    const steps = [100, 200, 350, 500, 600];
+    steps.forEach((ms, i) => {
+        setTimeout(() => {
+            if (!data.bodyMat) return;
+            const t = i / (steps.length - 1);
+            data.bodyMat.diffuseColor = BABYLON.Color3.Lerp(
+                new BABYLON.Color3(1, 0.05, 0.05), originalDiffuse, t);
+            if (i === steps.length - 1) {
+                data.bodyMat.diffuseColor  = originalDiffuse;
+                data.bodyMat.emissiveColor = new BABYLON.Color3(0, 0, 0);
+            }
+        }, ms);
+    });
+}
+
+function _triggerBiteFlash(container) {
+    if (_biteFlashTimer) { clearTimeout(_biteFlashTimer); _biteFlashEl?.remove(); }
+    const flash = document.createElement('div');
+    flash.className = 'pov-bite-flash';
+    container.appendChild(flash);
+    _biteFlashEl = flash;
+    container.classList.add('pov-shake');
+    setTimeout(() => container.classList.remove('pov-shake'), 350);
+    requestAnimationFrame(() => { requestAnimationFrame(() => { flash.style.opacity = '0'; }); });
+    _biteFlashTimer = setTimeout(() => {
+        flash.remove(); _biteFlashEl = null; _biteFlashTimer = null;
+    }, 600);
+}
+
+function _showBiteToast(container, text) {
+    if (_biteToastTimer) { clearTimeout(_biteToastTimer); _biteToastEl?.remove(); }
+    const toast = document.createElement('div');
+    toast.className = 'pov-bite-toast';
+    toast.textContent = text;
+    container.appendChild(toast);
+    _biteToastEl = toast;
+    requestAnimationFrame(() => { requestAnimationFrame(() => { toast.style.opacity = '1'; }); });
+    _biteToastTimer = setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => { toast.remove(); _biteToastEl = null; }, 500);
+        _biteToastTimer = null;
+    }, 3000);
+}
+
+/**
+ * Two-step attacker → victim picker at module scope.
+ * povGator may be null (HUD Make Attack with no context gator selected).
+ */
+function _showMakeAttackPicker(container, povGator, _targetGator) {
+    const existing = container.querySelector('.pov-make-attack-picker');
+    if (existing) existing.remove();
+
+    const aliveGators = living().filter(g => g.id !== (povGator?.id ?? -1));
+    if (aliveGators.length === 0) {
+        _showBiteToast(container, '\u26a0\ufe0f No other living gators to order!');
+        return;
+    }
+
+    const picker = document.createElement('div');
+    picker.className = 'pov-make-attack-picker';
+
+    function _renderPickerStep(title, options, onSelect) {
+        picker.innerHTML = `<div class="pov-picker-title">${title}</div>`;
+        for (const g of options) {
+            const btn = document.createElement('button');
+            btn.className = 'pov-picker-btn';
+            btn.textContent = `${g.emoji ?? '\ud83d\udc0a'} ${g.name}`;
+            btn.addEventListener('click', ev => { ev.stopPropagation(); onSelect(g); });
+            picker.appendChild(btn);
+        }
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'pov-picker-btn pov-picker-cancel';
+        cancelBtn.textContent = '\u2716 Cancel';
+        cancelBtn.addEventListener('click', ev => { ev.stopPropagation(); picker.remove(); });
+        picker.appendChild(cancelBtn);
+    }
+
+    _renderPickerStep('\ud83c\udfaf Who will attack?', aliveGators, (chosenAttacker) => {
+        const victimOptions = living().filter(g => g.id !== chosenAttacker.id);
+        if (victimOptions.length === 0) {
+            picker.remove();
+            _showBiteToast(container, `\u26a0\ufe0f No valid targets for ${chosenAttacker.name}!`);
+            return;
+        }
+        _renderPickerStep(`\ud83d\udc0a ${chosenAttacker.name} attacks who?`, victimOptions, (chosenVictim) => {
+            picker.remove();
+            // Queue the attack — attacker will walk to victim and bite; do NOT change view.
+            commandAttack(chosenAttacker.id, chosenVictim.id);
+            const witnessText = ''; // witness count not known until bite resolves
+            _showBiteToast(container, `\ud83c\udfaf ${chosenAttacker.name} is moving to attack ${chosenVictim.name}!`);
+            // Flash victim red after estimated travel time (capped at 8 s)
+            const attacker = state.gators.find(g => g.id === chosenAttacker.id);
+            const victim   = state.gators.find(g => g.id === chosenVictim.id);
+            const travelMs = attacker && victim
+                ? Math.min(8000, Math.max(600,
+                    Math.hypot(victim.x - attacker.x, victim.y - attacker.y) / (attacker.speed || 1.5) * 60))
+                : 2000;
+            setTimeout(() => flashGatorRed(chosenVictim.id), travelMs);
+        });
+    });
+
+    picker.style.left = '50%';
+    picker.style.transform = 'translateX(-50%)';
+    picker.style.top = '80px';
+    container.appendChild(picker);
+
+    setTimeout(() => {
+        window.addEventListener('click', function dismissPicker(ev) {
+            if (!picker.contains(ev.target)) {
+                picker.remove();
+                window.removeEventListener('click', dismissPicker, true);
+            }
+        }, { capture: true });
+    }, 0);
+}
+
 export function destroyBabylon() {
     if (!initialized) return;
     initialized = false;
     state.povGatorId = null;
     _dismissCtxMenu();
     _dismissPovChoices();
+    _biteToastEl?.remove(); _biteToastEl = null;
+    _biteFlashEl?.remove(); _biteFlashEl = null;
     window.removeEventListener('resize',   onResize);
     window.removeEventListener('keydown',  _onKeyDown);
     window.removeEventListener('keyup',    _onKeyUp);
@@ -1259,6 +1635,8 @@ export function destroyBabylon() {
     }
     _keys.clear();
     _manualActive = false;
+    _jumpY = 0;
+    _jumpVelocity = 0;
     clearTimeout(_manualTimer);
 
     // Clear POV bubble DOM
@@ -1293,6 +1671,84 @@ export function prevGator() {
     const alive = living();
     if (!alive.length) return;
     activeGatorIndex = (activeGatorIndex - 1 + alive.length) % alive.length;
+}
+
+/** Jump directly to a specific gator by simulation id. */
+export function setActiveGatorById(id) {
+    const alive = living();
+    const idx = alive.findIndex(g => g.id === id);
+    if (idx !== -1) activeGatorIndex = idx;
+}
+
+/**
+ * HUD Attack button — if a target gator is visible in the context menu, use that.
+ * Otherwise show a picker of all living gators; selecting one commands the POV
+ * gator to walk toward them and bite when in range.
+ */
+export function hudAttack() {
+    const container = _canvas?.parentElement;
+    if (!container) return;
+    if ((Date.now() - _lastBiteMs) < BITE_COOLDOWN_MS) {
+        _showBiteToast(container, '\u23f3 Attack cooling down\u2026');
+        return;
+    }
+    const alive = living();
+    const povGator = alive[activeGatorIndex % Math.max(alive.length, 1)] ?? null;
+    if (!povGator) return;
+
+    // Show a one-step victim picker (all alive gators except the POV gator)
+    const existing = container.querySelector('.pov-make-attack-picker');
+    if (existing) existing.remove();
+
+    const victims = alive.filter(g => g.id !== povGator.id);
+    if (victims.length === 0) { _showBiteToast(container, '\u26a0\ufe0f No other gators!'); return; }
+
+    const picker = document.createElement('div');
+    picker.className = 'pov-make-attack-picker';
+    picker.innerHTML = `<div class="pov-picker-title">\ud83e\uddb7 Who to bite?</div>`;
+    for (const g of victims) {
+        const btn = document.createElement('button');
+        btn.className = 'pov-picker-btn';
+        btn.textContent = `${g.emoji ?? '\ud83d\udc0a'} ${g.name}`;
+        btn.addEventListener('click', ev => {
+            ev.stopPropagation();
+            picker.remove();
+            _lastBiteMs = Date.now();
+            commandAttack(povGator.id, g.id);
+            _showBiteToast(container, `\ud83e\uddb7 Moving to bite ${g.name}\u2026`);
+            // Flash victim red after estimated travel time
+            const travelMs2 = Math.min(8000, Math.max(600,
+                Math.hypot(g.x - povGator.x, g.y - povGator.y) / (povGator.speed || 1.5) * 60));
+            setTimeout(() => flashGatorRed(g.id), travelMs2);
+        });
+        picker.appendChild(btn);
+    }
+    const cancel = document.createElement('button');
+    cancel.className = 'pov-picker-btn pov-picker-cancel';
+    cancel.textContent = '\u2716 Cancel';
+    cancel.addEventListener('click', ev => { ev.stopPropagation(); picker.remove(); });
+    picker.appendChild(cancel);
+    picker.style.cssText = 'left:50%;transform:translateX(-50%);top:80px;';
+    container.appendChild(picker);
+    setTimeout(() => {
+        window.addEventListener('click', function d(ev) {
+            if (!picker.contains(ev.target)) { picker.remove(); window.removeEventListener('click', d, true); }
+        }, { capture: true });
+    }, 0);
+}
+
+/**
+ * HUD Make Attack button — always shows the full two-step
+ * attacker → victim picker regardless of whether a target is active.
+ */
+export function hudMakeAttack() {
+    const container = _canvas?.parentElement;
+    if (!container) return;
+    const alive = living();
+    const povGator = alive[activeGatorIndex % Math.max(alive.length, 1)] ?? null;
+    // Pass null as targetGator so the picker shows all gators as potential attackers
+    // except the POV gator (the player), matching the existing Make Attack UX.
+    _showMakeAttackPicker(container, povGator, null);
 }
 
 function onResize() {

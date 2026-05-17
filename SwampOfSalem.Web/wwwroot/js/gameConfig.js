@@ -83,5 +83,23 @@ export const HOUSE_COLORS   = G.HOUSE_COLORS;
 export const LIAR_CHANCE    = G.LIAR_CHANCE;
 export const COMPAT         = G.COMPAT;
 
+// ── Bite / fight-or-flight ────────────────────────────────────
+// These come directly from GameConstants.cs and control how the
+// bite system plays out.  Change them in C# — they auto-propagate here.
+/** Number of bites before a gator dies. */
+export const BITE_DEATH_THRESHOLD               = G.BITE_DEATH_THRESHOLD;
+/** Minimum flee window after being bitten (ms). */
+export const BITE_FLEE_MIN_MS                   = G.BITE_FLEE_MIN_MS;
+/** Extra random ms added to the flee window (actual = min + rnd(extra)). */
+export const BITE_FLEE_EXTRA_MS                 = G.BITE_FLEE_EXTRA_MS;
+/** 0–1 probability that the flee victim counter-attacks. */
+export const BITE_COUNTER_CHANCE                = G.BITE_COUNTER_CHANCE;
+/** 0–1 probability that a neutral witness sides with the attacker. */
+export const NEUTRAL_WITNESS_SIDE_WITH_ATTACKER = G.NEUTRAL_WITNESS_SIDE_WITH_ATTACKER;
+/** 0–1 probability that a liar flips an opinion before sharing it. */
+export const LIAR_FLIP_CHANCE                   = G.LIAR_FLIP_CHANCE;
+/** Random extra turns added on top of the base-5 conversation length. */
+export const CONVERSATION_EXTRA_TURNS           = G.CONVERSATION_EXTRA_TURNS;
+
 // ── MOOD_EMOJI (function — cannot come from JSON) ─────────────
 export const MOOD_EMOJI = s => s >= 2 ? '\u{1F604}' : s >= 1 ? '\u{1F60A}' : s >= 0 ? '\u{1F610}' : s >= -1 ? '\u{1F61F}' : '\u{1F624}';
