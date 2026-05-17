@@ -1088,5 +1088,121 @@ button.secondary:hover { background: rgba(30, 65, 28, 0.85); }
 }
 .ai-modal-ok:hover { background: rgba(40,120,35,.95); }
 
+/* ── POV free-camera control hint ── */
+#pov-control-hint {
+    position: absolute;
+    bottom: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,.55);
+    color: rgba(200,230,180,.85);
+    font-size: .78rem;
+    padding: .28rem .7rem;
+    border-radius: 6px;
+    pointer-events: none;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity .35s ease;
+    z-index: 12;
+}
 
+/* ── POV gator context menu ── */
+.pov-context-menu {
+    position: absolute;
+    z-index: 50;
+    background: rgba(12, 28, 12, 0.96);
+    border: 1px solid rgba(80, 180, 60, 0.45);
+    border-radius: 9px;
+    padding: .35rem .3rem .3rem;
+    min-width: 170px;
+    box-shadow: 0 6px 28px rgba(0,0,0,.75);
+    backdrop-filter: blur(6px);
+    animation: ctxMenuPop .12s ease-out;
+}
+@keyframes ctxMenuPop {
+    from { transform: scale(.88); opacity: 0; }
+    to   { transform: scale(1);   opacity: 1; }
+}
+.pov-ctx-title {
+    font-size: .78rem;
+    font-weight: 700;
+    color: #78c860;
+    padding: .1rem .5rem .35rem;
+    border-bottom: 1px solid rgba(80,180,60,.2);
+    margin-bottom: .25rem;
+    white-space: nowrap;
+}
+.pov-ctx-btn {
+    display: block;
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: #c8e8b0;
+    font-size: .82rem;
+    text-align: left;
+    padding: .32rem .55rem;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background .12s;
+}
+.pov-ctx-btn:hover:not([disabled]) {
+    background: rgba(80,180,60,.18);
+}
+.pov-ctx-btn[disabled] {
+    opacity: .38;
+    cursor: default;
+}
 
+/* ── POV in-conversation response choices ── */
+.pov-choices {
+    position: absolute;
+    bottom: 64px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 55;
+    background: rgba(8, 22, 8, 0.96);
+    border: 1px solid rgba(80, 200, 60, 0.5);
+    border-radius: 12px;
+    padding: .6rem .5rem .5rem;
+    min-width: 280px;
+    max-width: 480px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.85);
+    backdrop-filter: blur(8px);
+    animation: choicesPop .15s ease-out;
+}
+@keyframes choicesPop {
+    from { transform: translateX(-50%) scale(.9); opacity: 0; }
+    to   { transform: translateX(-50%) scale(1);  opacity: 1; }
+}
+.pov-choices-label {
+    font-size: .72rem;
+    color: #78c860;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    padding: 0 .4rem .4rem;
+    border-bottom: 1px solid rgba(80,200,60,.2);
+    margin-bottom: .4rem;
+}
+.pov-choice-btn {
+    display: block;
+    width: 100%;
+    background: rgba(30,70,20,.45);
+    border: 1px solid rgba(80,180,60,.25);
+    color: #d8f0c0;
+    font-size: .85rem;
+    text-align: left;
+    padding: .45rem .7rem;
+    border-radius: 7px;
+    cursor: pointer;
+    margin-bottom: .3rem;
+    transition: background .12s, border-color .12s;
+    line-height: 1.4;
+}
+.pov-choice-btn:last-child {
+    margin-bottom: 0;
+}
+.pov-choice-btn:hover {
+    background: rgba(60,160,40,.3);
+    border-color: rgba(100,220,70,.5);
+}

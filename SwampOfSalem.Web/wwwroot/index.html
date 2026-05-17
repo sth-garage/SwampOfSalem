@@ -236,9 +236,6 @@
 
                     <div class="splash-buttons">
                         <button class="btn-primary" id="startGameBtn">▶ Start Game</button>
-                        <button class="btn-secondary" id="testAiBtn">🔌 Test AI</button>
-                        <button class="btn-secondary" id="testConvSplashBtn">🗨 Test Conv</button>
-                        <button class="btn-secondary" id="getGatorBtn">🐊 Get Gator</button>
                     </div>
                 </div>
                 <div id="splash-test" style="display:none">
@@ -325,6 +322,7 @@
             <span id="babylon-pov-gator-label">🐊 —</span>
             <button id="babylon-pov-next-btn">▶</button>
         </div>
+        <div id="pov-control-hint">WASD / ↑↓←→ move &nbsp;·&nbsp; drag or click+mouse look &nbsp;·&nbsp; Esc = follow</div>
     </div>
 
     <!-- Night Report Overlay -->
@@ -404,7 +402,7 @@
             }
 
             // Dynamic import so gameConfig.js is not evaluated until window.GameConfig is ready
-            const { initSimulation } = await import('./js/main.js?v=3');
+            const { initSimulation } = await import('./js/main.js?v=4');
             initSimulation(null, dialogSource);
         });
 
@@ -461,7 +459,7 @@
                 console.warn('[DialogSource] Failed to set mode:', err);
             }
 
-            const { initSimulation, testConversation } = await import('./js/main.js?v=3');
+            const { initSimulation, testConversation } = await import('./js/main.js?v=4');
             initSimulation(null, dialogSource);
             // Wait for gators to spawn before triggering the conversation
             setTimeout(() => testConversation(), 2000);
@@ -585,7 +583,7 @@
 
         async function loadBabylonMod() {
             if (!babylonModule) {
-                babylonModule = await import('./js/gatorBabylon.js');
+                babylonModule = await import('./js/gatorBabylon.js?v=4');
             }
             return babylonModule;
         }

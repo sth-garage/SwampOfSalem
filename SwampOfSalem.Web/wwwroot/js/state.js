@@ -111,6 +111,16 @@ export const state = {
     // Used by debate speech generation to accuse/defend whole groups.
     cliques: [],            // Array<{memberIds: number[]}> — detected social clusters.
     noNewConversations: false, // When true, no new conversations can start (end-of-day lock).
+
+    // ── POV mode ──────────────────────────────────────────────────────────
+    // Set to the gator ID of the currently-viewed gator while Babylon POV is
+    // active. Conversation logic skips this gator as an initiator or partner.
+    povGatorId: null,
+
+    // ── Obstacle registry (populated by gatorBabylon.js) ─────────────────
+    // Each entry: { wx, wz, radius } — world-space circle that gators should avoid.
+    // wx/wz are Babylon world units (simulation px * SCALE).
+    obstacles: [],
 };
 
 // ── Reset helper — called on respawn ──────────────────────────
@@ -154,4 +164,5 @@ export function resetGameState() {
     state.privateChatBubbles = state.privateChatBubbles ?? new Map();
     state.cliques              = [];
     state.noNewConversations   = false;
+    state.povGatorId           = null;
 }

@@ -17,6 +17,8 @@
 
 import { state } from './state.js';
 import { living } from './gator.js';
+import { startPovConversation } from './simulation.js';
+import { setPovChoiceHandler } from './agentQueue.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const SCALE  = 0.1;
@@ -33,12 +35,147 @@ let initialized  = false;
 let activeGatorIndex = 0;
 let _canvas = null;
 
+// ── Free-camera (WASD / arrow / mouse) ─────────────────────────────────────
+// When the user touches any input key or drags the mouse the camera detaches
+// from the auto-follow logic.  It reverts to gator-follow after
+// MANUAL_RESUME_MS of inactivity OR when the user presses Escape.
+const MANUAL_RESUME_MS = 4000;
+const FREE_CAM_SPEED   = 12;   // world units per second for keyboard
+const MOUSE_SENSITIVITY = 0.0020; // radians per pixel
+
+const _keys = new Set();         // currently held keys
+let _manualYaw   = 0;           // radians — horizontal look
+let _manualPitch = 0;           // radians — vertical look
+let _manualActive   = false;    // true while user is in control
+let _manualTimer    = 0;        // setTimeout handle
+let _mouseDown      = false;
+let _lastMouseX     = 0;
+let _lastMouseY     = 0;
+
+function _enterManual() {
+    _manualActive = true;
+    clearTimeout(_manualTimer);
+    _manualTimer = setTimeout(_exitManual, MANUAL_RESUME_MS);
+    const hint = document.getElementById('pov-control-hint');
+    if (hint) hint.style.opacity = '1';
+}
+
+function _exitManual() {
+    _manualActive = false;
+    const hint = document.getElementById('pov-control-hint');
+    if (hint) hint.style.opacity = '0';
+    if (document.pointerLockElement === _canvas) document.exitPointerLock();
+}
+
+function _onKeyDown(e) {
+    if (!initialized) return;
+    const k = e.key.toLowerCase();
+    const isMove = ['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k);
+    if (!isMove) { if (k === 'escape') _exitManual(); return; }
+    e.preventDefault();
+    _keys.add(k);
+    if (!_manualActive) {
+        // Seed yaw from current camera look direction so there is no jump
+        if (camera) {
+            const fwd = camera.getTarget().subtract(camera.position);
+            _manualYaw   = Math.atan2(fwd.x, fwd.z);
+            _manualPitch = Math.atan2(fwd.y, Math.sqrt(fwd.x*fwd.x + fwd.z*fwd.z));
+        }
+    }
+    _enterManual();
+}
+
+function _onKeyUp(e) {
+    _keys.delete(e.key.toLowerCase());
+}
+
+function _onMouseDown(e) {
+    if (!initialized) return;
+    if (e.button !== 2) return;
+    const container = _canvas && _canvas.parentElement;
+    if (container && !container.contains(e.target)) return;
+    _mouseDown = true;
+    _lastMouseX = e.clientX;
+    _lastMouseY = e.clientY;
+    // Seed yaw/pitch from live camera direction so there is no jump
+    if (camera) {
+        const fwd = camera.getTarget().subtract(camera.position);
+        _manualYaw   = Math.atan2(fwd.x, fwd.z);
+        _manualPitch = Math.atan2(fwd.y, Math.sqrt(fwd.x * fwd.x + fwd.z * fwd.z));
+    }
+    _enterManual();
+    e.preventDefault();
+    // Pointer capture keeps move events coming even when the cursor leaves the canvas
+    try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+}
+
+function _onMouseUp(e) {
+    if (e.button !== 2) return;
+    _mouseDown = false;
+    try { e.target.releasePointerCapture(e.pointerId); } catch (_) {}
+}
+
+function _onMouseMove(e) {
+    if (!initialized || !_mouseDown) return;
+    // Use movementX/Y (pointer event deltas) — always correct even with capture
+    const dx = e.movementX ?? (e.clientX - _lastMouseX);
+    const dy = e.movementY ?? (e.clientY - _lastMouseY);
+    _lastMouseX = e.clientX;
+    _lastMouseY = e.clientY;
+    if (dx === 0 && dy === 0) return;
+    _manualYaw   -= dx * MOUSE_SENSITIVITY;
+    _manualPitch += dy * MOUSE_SENSITIVITY; // inverted Y: drag down = look down
+    _manualPitch  = Math.max(-1.3, Math.min(1.3, _manualPitch));
+    _enterManual();
+}
+
+function _onPointerLockChange() {
+    // No-op: pointer lock is not used for right-drag look
+}
+
+/**
+ * Apply keyboard movement and write camera position/target each frame
+ * when manual-control mode is active. Called from the render loop.
+ */
+function _applyManualCamera(dt) {
+    if (!camera) return;
+    const sp = FREE_CAM_SPEED * dt;
+    const cy = Math.cos(_manualYaw),   sy = Math.sin(_manualYaw);
+    const cp = Math.cos(_manualPitch), sp2 = Math.sin(_manualPitch);
+
+    // Forward vector (ignoring pitch for XZ movement so WASD feels grounded)
+    const fwdX =  sy, fwdZ =  cy;
+    // Right vector
+    const rtX  =  cy, rtZ  = -sy;
+
+    let moveX = 0, moveZ = 0;
+    if (_keys.has('w') || _keys.has('arrowup'))    { moveX += fwdX; moveZ += fwdZ; }
+    if (_keys.has('s') || _keys.has('arrowdown'))  { moveX -= fwdX; moveZ -= fwdZ; }
+    if (_keys.has('a') || _keys.has('arrowleft'))  { moveX -= rtX;  moveZ -= rtZ;  }
+    if (_keys.has('d') || _keys.has('arrowright')) { moveX += rtX;  moveZ += rtZ;  }
+
+    if (moveX || moveZ) {
+        camera.position.x += moveX * sp;
+        camera.position.z += moveZ * sp;
+        _enterManual(); // keep timer alive while moving
+    }
+
+    // Build look-at target from yaw + pitch
+    const lookX = camera.position.x + sy * cp;
+    const lookY = camera.position.y + sp2;
+    const lookZ = camera.position.z + cy * cp;
+    camera.setTarget(new window.BABYLON.Vector3(lookX, lookY, lookZ));
+}
+
 function worldX(px) { return px * SCALE; }
 function worldZ(py) { return py * SCALE; }
 
 // ── Scene ──────────────────────────────────────────────────────────────────
 function buildScene() {
     const BABYLON = window.BABYLON;
+
+    // Reset obstacle registry for this scene
+    state.obstacles = [];
 
     scene = new BABYLON.Scene(engine);
     // Sky colour — hazy grey-green swamp atmosphere
@@ -216,6 +353,67 @@ function buildScene() {
     buildTrees();
     buildReeds();
     buildRocks();
+    buildWall();
+}
+
+// ── Village perimeter wall ────────────────────────────────────────────────────
+// Four stone walls run along the edges of the island (x: 0–120, z: 0–80).
+// Each wall is visible and registered in state.obstacles so the 2-D simulation
+// movement code can steer gators away from it.
+function buildWall() {
+    const BABYLON = window.BABYLON;
+
+    const stoneMat = new BABYLON.StandardMaterial('wallStoneMat', scene);
+    stoneMat.diffuseColor  = new BABYLON.Color3(0.42, 0.38, 0.30);
+    stoneMat.specularColor = new BABYLON.Color3(0.12, 0.10, 0.08);
+    stoneMat.specularPower = 16;
+
+    const capMat = new BABYLON.StandardMaterial('wallCapMat', scene);
+    capMat.diffuseColor = new BABYLON.Color3(0.30, 0.28, 0.22);
+
+    const WALL_H   = 2.8;   // wall height (world units)
+    const WALL_T   = 0.9;   // wall thickness
+    const ISLAND_X = 120;
+    const ISLAND_Z = 80;
+    const OFFSET   = 1.0;   // how far inward from the island edge the wall sits
+
+    // Four segments: North (z≈0), South (z≈80), West (x≈0), East (x≈120)
+    const segments = [
+        // [cx, cz, width, depth, label]
+        [ISLAND_X / 2, OFFSET,          ISLAND_X + WALL_T * 2, WALL_T, 'wallN'],
+        [ISLAND_X / 2, ISLAND_Z - OFFSET, ISLAND_X + WALL_T * 2, WALL_T, 'wallS'],
+        [OFFSET,          ISLAND_Z / 2, WALL_T, ISLAND_Z - OFFSET * 2, 'wallW'],
+        [ISLAND_X - OFFSET, ISLAND_Z / 2, WALL_T, ISLAND_Z - OFFSET * 2, 'wallE'],
+    ];
+
+    segments.forEach(([cx, cz, w, d, name]) => {
+        const wall = BABYLON.MeshBuilder.CreateBox(name,
+            { width: w, height: WALL_H, depth: d }, scene);
+        wall.position = new BABYLON.Vector3(cx, WALL_H / 2, cz);
+        wall.material = stoneMat;
+
+        // Crenellation cap on top
+        const cap = BABYLON.MeshBuilder.CreateBox(`${name}_cap`,
+            { width: w, height: WALL_T * 0.4, depth: d + WALL_T * 0.3 }, scene);
+        cap.position = new BABYLON.Vector3(cx, WALL_H + WALL_T * 0.2, cz);
+        cap.material = capMat;
+    });
+
+    // Corner towers
+    const towerR = WALL_T * 1.4;
+    const towerH = WALL_H + 1.2;
+    const corners = [
+        [OFFSET, OFFSET],
+        [ISLAND_X - OFFSET, OFFSET],
+        [OFFSET, ISLAND_Z - OFFSET],
+        [ISLAND_X - OFFSET, ISLAND_Z - OFFSET],
+    ];
+    corners.forEach(([cx, cz], i) => {
+        const tower = BABYLON.MeshBuilder.CreateCylinder(`tower${i}`,
+            { diameter: towerR * 2, height: towerH, tessellation: 8 }, scene);
+        tower.position = new BABYLON.Vector3(cx, towerH / 2, cz);
+        tower.material = stoneMat;
+    });
 }
 
 // ── Reed clusters along water edges ─────────────────────────────────────────
@@ -288,8 +486,26 @@ function buildRocks() {
         moss.position = new BABYLON.Vector3(x, s * 0.65, z);
         moss.rotation.y = rock.rotation.y;
         moss.material   = mossMat;
+
+        // Register as obstacle in sim-px (world * 10)
+        state.obstacles.push({ x: x * 10, y: z * 10, r: (s * 0.9 + 0.4) * 10, type: 'rock' });
     });
 }
+
+// Fixed island-tree positions (world units) – shared with 2-D collision system.
+// Exported so simulation.js can mirror them without re-generating randomly.
+export const ISLAND_TREE_POSITIONS = [
+    // perimeter: north edge
+    [8,3],[20,4],[34,2],[48,4],[62,3],[76,4],[90,2],[104,3],[116,4],
+    // perimeter: south edge
+    [8,74],[20,75],[34,73],[48,75],[62,74],[76,75],[90,73],[104,74],
+    // perimeter: west edge
+    [3,10],[3,22],[3,36],[3,50],[3,64],
+    // perimeter: east edge
+    [117,10],[117,22],[117,36],[117,50],[117,64],
+    // interior scatter
+    [22,18],[88,18],[40,58],[100,58],[60,34],[48,62],[72,48],[30,42],
+];
 
 function buildTrees() {
     const BABYLON = window.BABYLON;
@@ -319,18 +535,9 @@ function buildTrees() {
     for (let i = 0; i < 40; i++) positions.push([128 + Math.random() * 22, Math.random() * 100 - 10, true]);
 
     // ── Sparse trees on the island itself ─────────────────────────────────
-    // Island perimeter (thinning as they approach the bog edge)
-    for (let i = 0; i < 18; i++) {
-        const edge = i % 4;
-        let x, z;
-        if (edge === 0)      { x = 5  + Math.random() * 110; z = 2  + Math.random() * 6; }
-        else if (edge === 1) { x = 5  + Math.random() * 110; z = 73 + Math.random() * 6; }
-        else if (edge === 2) { x = 2  + Math.random() * 6;   z = 6  + Math.random() * 68; }
-        else                 { x = 112 + Math.random() * 6;  z = 6  + Math.random() * 68; }
-        positions.push([x, z, false]);
-    }
-    // Occasional interior tree
-    for (let i = 0; i < 8; i++) positions.push([8 + Math.random() * 104, 6 + Math.random() * 68, false]);
+    // Use the fixed ISLAND_TREE_POSITIONS so 2-D simulation can mirror them.
+    ISLAND_TREE_POSITIONS.forEach(([x, z]) => positions.push([x, z, false]));
+
 
     positions.forEach(([x, z, isFarBank], idx) => {
         const tall = isFarBank;
@@ -355,6 +562,12 @@ function buildTrees() {
                 { diameterTop: 0, diameterBottom: (1.0 + Math.random()) * (tall ? 2.2 : 1.5), height: leafH2, tessellation: 7 }, scene);
             leaf2.position = new BABYLON.Vector3(x, h + leafH1 - 0.3 + leafH2 / 2 - 0.4, z);
             leaf2.material = leafMats[(leafMats.indexOf(lmat) + 1) % leafMats.length];
+        }
+
+        // Register island-side trees as circular obstacles in sim-px
+        if (!isFarBank) {
+            const trunkR = (0.45 + 0.5) * 10;
+            state.obstacles.push({ x: x * 10, y: z * 10, r: trunkR, type: 'tree' });
         }
     });
 }
@@ -400,6 +613,9 @@ function buildHouses() {
         door.position = new BABYLON.Vector3(worldX(h.doorX), 1.5, worldZ(h.doorY));
         door.material = doorMat;
         houseMeshes.push(door);
+
+        // Register house as circular obstacle in sim-px
+        state.obstacles.push({ x: cx * 10, y: cz * 10, r: (Math.hypot(HOUSE_W, HOUSE_D) / 2 + 0.5) * 10, type: 'house' });
     });
 }
 
@@ -462,7 +678,7 @@ function getOrCreateGatorMesh(gator) {
     // Belly accent strip on torso front
     const belly = BABYLON.MeshBuilder.CreateBox(`belly${gator.id}`,
         { width: 0.55, height: 0.9, depth: 0.05 }, scene);
-    belly.position = new BABYLON.Vector3(0, 1.65, -0.30);
+    belly.position = new BABYLON.Vector3(0, 1.65, 0.30);
     belly.material = bellyMat;
     belly.parent = root;
 
@@ -529,39 +745,39 @@ function getOrCreateGatorMesh(gator) {
 
     const snout = BABYLON.MeshBuilder.CreateBox(`snout${gator.id}`,
         { width: 0.7, height: 0.32, depth: 0.95 }, scene);
-    snout.position = new BABYLON.Vector3(0, -0.08, -0.85);
+    snout.position = new BABYLON.Vector3(0, -0.08, 0.85);
     snout.material = snoutMat;
     snout.parent = headPivot;
 
     // Teeth row (top + bottom)
     const teethTop = BABYLON.MeshBuilder.CreateBox(`teethT${gator.id}`,
         { width: 0.6, height: 0.05, depth: 0.85 }, scene);
-    teethTop.position = new BABYLON.Vector3(0, -0.20, -0.85);
+    teethTop.position = new BABYLON.Vector3(0, -0.20, 0.85);
     teethTop.material = toothMat;
     teethTop.parent = headPivot;
 
     [-0.22, 0.22].forEach((ex, ei) => {
         const eye = BABYLON.MeshBuilder.CreateSphere(`eye${gator.id}_${ei}`,
             { diameter: 0.20, segments: 8 }, scene);
-        eye.position = new BABYLON.Vector3(ex, 0.32, -0.10);
+        eye.position = new BABYLON.Vector3(ex, 0.32, 0.10);
         eye.material = eyeMat;
         eye.parent = headPivot;
 
         // Pupil
         const pupil = BABYLON.MeshBuilder.CreateSphere(`pupil${gator.id}_${ei}`,
             { diameter: 0.09, segments: 6 }, scene);
-        pupil.position = new BABYLON.Vector3(ex, 0.30, -0.18);
+        pupil.position = new BABYLON.Vector3(ex, 0.30, 0.18);
         const pmat = new BABYLON.StandardMaterial(`pmat${gator.id}_${ei}`, scene);
         pmat.diffuseColor = new BABYLON.Color3(0, 0, 0);
         pupil.material = pmat;
         pupil.parent = headPivot;
     });
 
-    // Tail — small stub at the back of the hips for the alligator silhouette
+    // Tail — stub at the back of the hips (opposite the snout / -Z direction)
     const tail = BABYLON.MeshBuilder.CreateBox(`tail${gator.id}`,
         { width: 0.40, height: 0.30, depth: 0.85 }, scene);
-    tail.position = new BABYLON.Vector3(0, 1.0, 0.55);
-    tail.rotation.x = -0.35;
+    tail.position = new BABYLON.Vector3(0, 1.0, -0.55);
+    tail.rotation.x = 0.35;
     tail.material = bodyMat;
     tail.parent = root;
 
@@ -639,6 +855,10 @@ function syncGatorMeshes(deltaSec) {
 }
 
 // ── Camera ─────────────────────────────────────────────────────────────────
+// POV_FACE_DIST: how many world units in front of the partner the camera sits
+// during a conversation (≈2 world units = ~20 sim-px, which feels like a few feet).
+const POV_FACE_DIST = 2.2;
+
 function updateCamera() {
     const alive = living();
     if (!alive.length) return;
@@ -651,23 +871,38 @@ function updateCamera() {
     const gx = worldX(gator.x);
     const gz = worldZ(gator.y);
 
-    camera.position.x = gx;
-    camera.position.y = CAM_H;
-    camera.position.z = gz;
-
-    // If the POV gator is in conversation, look directly at the partner
-    let lookX, lookZ;
+    // If the POV gator is in conversation, position camera face-to-face with the partner
     const partner = gator.talkingTo != null
         ? state.gators.find(q => q.id === gator.talkingTo) ?? null
         : null;
 
     if (partner) {
-        lookX = worldX(partner.x);
-        lookZ = worldZ(partner.y);
+        const px = worldX(partner.x);
+        const pz = worldZ(partner.y);
+
+        // Direction from partner toward POV gator (i.e. stand on gator's side, look at partner)
+        const dx = gx - px;
+        const dz = gz - pz;
+        const d  = Math.sqrt(dx * dx + dz * dz) || 1;
+        const nx = dx / d;
+        const nz = dz / d;
+
+        // Place camera POV_FACE_DIST world units in front of the partner
+        camera.position.x = px + nx * POV_FACE_DIST;
+        camera.position.y = CAM_H;
+        camera.position.z = pz + nz * POV_FACE_DIST;
+
+        // Look directly at the partner's eye level
+        camera.setTarget(new window.BABYLON.Vector3(px, CAM_H * 0.9, pz));
     } else {
+        camera.position.x = gx;
+        camera.position.y = CAM_H;
+        camera.position.z = gz;
+
         const dx = (gator.targetX ?? gator.x) - gator.x;
         const dy = (gator.targetY ?? gator.y) - gator.y;
         const moveDist = Math.sqrt(dx * dx + dy * dy);
+        let lookX, lookZ;
         if (moveDist > 4) {
             lookX = gx + worldX(dx) * 20;
             lookZ = gz + worldZ(dy) * 20;
@@ -675,9 +910,8 @@ function updateCamera() {
             lookX = worldX(gator.x + (600 - gator.x) * 0.3);
             lookZ = worldZ(gator.y + (400 - gator.y) * 0.3);
         }
+        camera.setTarget(new window.BABYLON.Vector3(lookX, CAM_H * 0.85, lookZ));
     }
-
-    camera.setTarget(new window.BABYLON.Vector3(lookX, CAM_H * 0.85, lookZ));
 
     // Hide active gator's own mesh
     gatorMeshes.forEach((data, id) => {
@@ -818,50 +1052,120 @@ export async function initBabylon(container) {
     camera.minZ = 0.1;
     camera.maxZ = 300;
 
-    window.addEventListener('resize', onResize);
+    window.addEventListener('resize',  onResize);
+    window.addEventListener('keydown',  _onKeyDown);
+    window.addEventListener('keyup',    _onKeyUp);
+    // Right-drag look: use pointer events on the canvas so setPointerCapture works
+    _canvas.addEventListener('pointerdown', _onMouseDown);
+    _canvas.addEventListener('pointerup',   _onMouseUp);
+    _canvas.addEventListener('pointermove', _onMouseMove);
+    _canvas.addEventListener('pointercancel', e => { _mouseDown = false; });
 
-    // Double-click on the canvas to switch POV to the nearest visible alligator
-    _canvas.addEventListener('dblclick', e => {
+    // Single-click on the canvas: show context menu for the nearest alligator
+    _canvas.addEventListener('click', e => {
+        if (!initialized) return;
+        // Ignore if this click was a drag-end from mouse-look
+        if (_mouseDown) return;
         const alive = living();
         if (alive.length < 2) return;
+        const curId = alive[activeGatorIndex % alive.length]?.id;
+        const rect  = _canvas.getBoundingClientRect();
+        const hit   = _pickGatorAtScreen(e.clientX - rect.left, e.clientY - rect.top, 80, curId);
+        if (hit) _showCtxMenu(e.clientX, e.clientY, hit.gator, hit.idx);
+        else _dismissCtxMenu();
+    });
 
-        const rect   = _canvas.getBoundingClientRect();
-        const dpr    = window.devicePixelRatio || 1;
-        const clickX = (e.clientX - rect.left) * dpr;
-        const clickY = (e.clientY - rect.top)  * dpr;
+    // Suppress the browser context menu on right-click so right-drag look works cleanly
+    _canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-        let bestIdx   = -1;
-        let bestDist  = Infinity;
-        const curId   = alive[activeGatorIndex % alive.length]?.id;
+    // ── POV context menu ────────────────────────────────────────────────────────
+    let _ctxMenu = null;
 
+    function _dismissCtxMenu() {
+        if (_ctxMenu) { _ctxMenu.remove(); _ctxMenu = null; }
+    }
+
+    /**
+     * Project all living (non-POV) gator heads to screen space and return the one
+     * closest to (clickX, clickY) in CSS pixels, or null if none within hitRadius.
+     */
+    function _pickGatorAtScreen(clickX, clickY, hitRadius, curId) {
+        const BABYLON = window.BABYLON;
+        const alive = living();
+        let bestIdx = -1, bestDist = Infinity;
         alive.forEach((g, i) => {
-            if (g.id === curId) return; // skip current POV gator
+            if (g.id === curId) return;
             const data = gatorMeshes.get(g.id);
             if (!data || !data.root) return;
-
             const headPos = data.root.position.clone();
             headPos.y += 3.2;
             try {
                 const vp = camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight());
-                const sp = BABYLON.Vector3.Project(
-                    headPos,
-                    BABYLON.Matrix.Identity(),
-                    scene.getTransformMatrix(),
-                    vp
-                );
+                const sp = BABYLON.Vector3.Project(headPos, BABYLON.Matrix.Identity(), scene.getTransformMatrix(), vp);
                 if (sp.z < 0 || sp.z > 1) return;
-                const dist = Math.hypot(sp.x - clickX, sp.y - clickY);
-                if (dist < bestDist && dist < 120 * dpr) {
-                    bestDist = dist;
-                    bestIdx  = i;
-                }
+                const dpr = window.devicePixelRatio || 1;
+                const sx = sp.x / dpr, sy = sp.y / dpr;
+                const d = Math.hypot(sx - clickX, sy - clickY);
+                if (d < bestDist && d < hitRadius) { bestDist = d; bestIdx = i; }
             } catch (_) {}
         });
+        return bestIdx === -1 ? null : { gator: living()[bestIdx], idx: bestIdx };
+    }
 
-        if (bestIdx !== -1) {
-            activeGatorIndex = bestIdx;
-        }
-    });
+    function _showCtxMenu(clientX, clientY, targetGator, targetIdx) {
+        _dismissCtxMenu();
+        // Release pointer lock so the user can click menu items
+        if (document.pointerLockElement === _canvas) document.exitPointerLock();
+
+        const container = _canvas?.parentElement;
+        if (!container) return;
+
+        const canConverse = !state.activeConversation && !state.noNewConversations;
+        const menu = document.createElement('div');
+        menu.className = 'pov-context-menu';
+        menu.innerHTML = `
+            <div class="pov-ctx-title">🐊 ${targetGator.name}</div>
+            <button class="pov-ctx-btn" id="pov-ctx-conv"${canConverse ? '' : ' disabled'}>💬 Start Conversation</button>
+            <button class="pov-ctx-btn" id="pov-ctx-switch">👁 Switch POV</button>`;
+
+        // Position near cursor, clamped inside container
+        const cRect = container.getBoundingClientRect();
+        let left = clientX - cRect.left + 10;
+        let top  = clientY - cRect.top  + 10;
+        menu.style.cssText = `left:${left}px;top:${top}px;`;
+        container.appendChild(menu);
+        _ctxMenu = menu;
+
+        // Clamp after render so we know the menu size
+        requestAnimationFrame(() => {
+            if (!_ctxMenu) return;
+            const mRect = menu.getBoundingClientRect();
+            const cR    = container.getBoundingClientRect();
+            if (mRect.right  > cR.right)  left -= mRect.right  - cR.right  + 8;
+            if (mRect.bottom > cR.bottom) top  -= mRect.bottom - cR.bottom + 8;
+            menu.style.left = `${Math.max(4, left)}px`;
+            menu.style.top  = `${Math.max(4, top)}px`;
+        });
+
+        menu.querySelector('#pov-ctx-conv').addEventListener('click', e => {
+            e.stopPropagation();
+            _dismissCtxMenu();
+            const alive = living();
+            const povGator = alive[activeGatorIndex % Math.max(alive.length, 1)] ?? null;
+            startPovConversation(povGator, targetGator);
+        });
+
+        menu.querySelector('#pov-ctx-switch').addEventListener('click', e => {
+            e.stopPropagation();
+            _dismissCtxMenu();
+            activeGatorIndex = targetIdx;
+        });
+
+        // Dismiss on next outside click
+        setTimeout(() => {
+            window.addEventListener('click', _dismissCtxMenu, { once: true, capture: true });
+        }, 0);
+    }   // end _showCtxMenu
 
     engine.runRenderLoop(() => {
         if (!scene) return;
@@ -869,9 +1173,15 @@ export async function initBabylon(container) {
         if (state.gators.length > 0) {
             const dt = engine.getDeltaTime() / 1000;
             syncGatorMeshes(dt);
-            updateCamera();
+            if (_manualActive) {
+                _applyManualCamera(dt);
+            } else {
+                updateCamera();
+            }
             const alive = living();
             const activeGator = alive[activeGatorIndex % Math.max(alive.length, 1)] ?? null;
+            // Keep shared state in sync so simulation.js can skip this gator for conversations
+            state.povGatorId = activeGator?.id ?? null;
             updatePovBubbles(activeGator);
             // Update HUD label
             const label = document.getElementById('babylon-pov-gator-label');
@@ -879,12 +1189,77 @@ export async function initBabylon(container) {
         }
         scene.render();
     });
+
+    // Register the POV response-choice handler with the conversation queue.
+    // This must happen after initBabylon so the container reference is live.
+    setPovChoiceHandler((options, onPick) => {
+        _showPovChoices(options, onPick);
+    });
+}
+
+// ── POV conversation response choices ─────────────────────────────────────
+// Shown during a conversation when it is the player-controlled gator's turn.
+// The other gator waits silently until the player picks a response.
+
+let _choicePanel = null;
+
+/**
+ * Display the in-conversation response-choice panel.
+ * @param {string[]} options  - 2–3 text choices to present.
+ * @param {function} onPick   - Called with the chosen string when the player selects.
+ */
+function _showPovChoices(options, onPick) {
+    _dismissPovChoices();
+    const container = _canvas?.parentElement;
+    if (!container) { onPick(options[0]); return; }
+
+    // Release pointer lock so the player can click
+    if (document.pointerLockElement === _canvas) document.exitPointerLock();
+
+    const panel = document.createElement('div');
+    panel.className = 'pov-choices';
+
+    const label = document.createElement('div');
+    label.className = 'pov-choices-label';
+    label.textContent = 'Your response…';
+    panel.appendChild(label);
+
+    options.forEach(text => {
+        const btn = document.createElement('button');
+        btn.className = 'pov-choice-btn';
+        btn.textContent = text;
+        btn.addEventListener('click', () => {
+            _dismissPovChoices();
+            onPick(text);
+        });
+        panel.appendChild(btn);
+    });
+
+    container.appendChild(panel);
+    _choicePanel = panel;
+}
+
+function _dismissPovChoices() {
+    if (_choicePanel) { _choicePanel.remove(); _choicePanel = null; }
 }
 
 export function destroyBabylon() {
     if (!initialized) return;
     initialized = false;
-    window.removeEventListener('resize', onResize);
+    state.povGatorId = null;
+    _dismissCtxMenu();
+    _dismissPovChoices();
+    window.removeEventListener('resize',   onResize);
+    window.removeEventListener('keydown',  _onKeyDown);
+    window.removeEventListener('keyup',    _onKeyUp);
+    if (_canvas) {
+        _canvas.removeEventListener('pointerdown',   _onMouseDown);
+        _canvas.removeEventListener('pointerup',     _onMouseUp);
+        _canvas.removeEventListener('pointermove',   _onMouseMove);
+    }
+    _keys.clear();
+    _manualActive = false;
+    clearTimeout(_manualTimer);
 
     // Clear POV bubble DOM
     _povBubbleDivs.forEach(d => d.remove());

@@ -68,6 +68,7 @@ import {
     pinTooltip, refreshPinnedTooltip, cleanPrivateChatBubbles,
     syncBabylonMeshes
 } from './rendering.js';
+import { ISLAND_TREE_POSITIONS } from './gatorBabylon.js';
 import { requestDialog, requestFullConversation, requestVote, recordMemory, drainNextConvTurn, setTickFunction } from './agentQueue.js';
 
 // ── Test Conversation ─────────────────────────────────────────
@@ -114,6 +115,51 @@ export function testConversation() {
         a.activity = 'moving'; a.talkingTo = null; a.ticksLeft = rndTicks('moving');
         b.activity = 'moving'; b.talkingTo = null; b.ticksLeft = rndTicks('moving');
     });
+}
+
+/**
+ * Starts a conversation initiated by the POV-controlled gator with a chosen partner.
+ * Called from gatorBabylon.js when the player clicks "Start Conversation" in the
+ * POV context menu.  Mirrors the tick()-based conversation logic but bypasses all
+ * guards (distance, cooldown, etc.) since the player explicitly requested it.
+ *
+ * Returns false if a conversation is already active or either gator is busy.
+ */
+export function startPovConversation(povGator, partner) {
+    if (!povGator || !partner) return false;
+    if (state.activeConversation) return false;
+    if (povGator.talkingTo !== null || partner.talkingTo !== null) return false;
+    if (povGator.activity === 'resting' || partner.activity === 'resting') return false;
+
+    const dur = rndTicks('talking');
+    povGator.activity  = 'talking'; povGator.talkingTo  = partner.id; povGator.ticksLeft = dur;
+    partner.activity   = 'talking'; partner.talkingTo   = povGator.id; partner.ticksLeft = dur;
+    state.activeConversation = true;
+
+    const firstMeeting = !(povGator.met ??= new Set()).has(partner.id);
+    if (firstMeeting) {
+        povGator.met.add(partner.id);
+        (partner.met ??= new Set()).add(povGator.id);
+        const compat = topicCompatibility(povGator.topicOpinions ?? {}, partner.topicOpinions ?? {});
+        const seed = Math.round(compat * 0.2);
+        povGator.relations[partner.id] = Math.max(-100, Math.min(100, seed));
+        partner.relations[povGator.id] = Math.max(-100, Math.min(100, seed));
+        povGator.perceivedRelations[partner.id] = seed;
+        partner.perceivedRelations[povGator.id]  = seed;
+        const introCtx = `First meeting. ${povGator.name} has opinions: ${Object.entries(povGator.topicOpinions ?? {}).map(([t,v])=>`${t}:${v>0?'+':''}${v}`).join(', ')}.`;
+        const openingLine = `Hi, I'm ${povGator.name}!`;
+        povGator.message = openingLine;
+        requestFullConversation(povGator, partner, openingLine, 6, introCtx, false, _onConversationCompleted);
+        recordMemory(povGator.id, state.dayNumber, 'first_meeting', `Met ${partner.name} for the first time`, partner.id);
+        recordMemory(partner.id, state.dayNumber, 'first_meeting', `Met ${povGator.name} for the first time`, povGator.id);
+    } else {
+        const openingLine = `Hey ${partner.name}!`;
+        povGator.message = openingLine;
+        requestFullConversation(povGator, partner, openingLine, 6, null, false, _onConversationCompleted);
+        recordMemory(povGator.id, state.dayNumber, 'conversation_start', `Started talking with ${partner.name}`, partner.id);
+        recordMemory(partner.id, state.dayNumber, 'conversation_start', `${povGator.name} started talking to me`, povGator.id);
+    }
+    return true;
 }
 
 // ── Chat logging & overhearing ────────────────────────────────
@@ -576,10 +622,12 @@ function tick() {
         if (next === 'talking') {
             const TALK_COOLDOWN_MS = 60_000;
             const now = Date.now();
-            // Don't start new conversations if one is already active or end-of-day lock is set
-            if (!state.activeConversation && !state.noNewConversations) {
+            // Don't start new conversations if one is already active or end-of-day lock is set.
+            // Also skip if this gator is currently the POV-controlled gator.
+            if (!state.activeConversation && !state.noNewConversations && gator.id !== state.povGatorId) {
             const nearby = [...free]
                 .filter(id => id !== gator.id)
+                .filter(id => id !== state.povGatorId)  // never drag the POV gator into a conversation
                 .map(id => state.gators.find(p => p.id === id))
                 .filter(p => p && dist(gator, p) <= TALK_DIST)
                 .filter(p => (gator.relations[p.id] ?? 0) > -60)
@@ -721,10 +769,16 @@ function tick() {
         gator.message   = null;
         if (next === 'moving') {
             const { W, H } = stageBounds();
-            gator.targetX = rndF(W);
-            gator.targetY = rndF(H);
+            const WALL_MARGIN = 20;
+            let tx, ty, tries = 0;
+            do {
+                tx = WALL_MARGIN + rndF(W - WALL_MARGIN * 2);
+                ty = WALL_MARGIN + rndF(H - WALL_MARGIN * 2);
+                tries++;
+            } while (_isInsideObstacle(tx + GATOR_SIZE/2, ty + GATOR_SIZE/2) && tries < 15);
+            gator.targetX = tx;
+            gator.targetY = ty;
             gator.indoors = false;
-
             }
 
         if (next === 'resting') free.delete(gator.id);
@@ -773,6 +827,55 @@ function tick() {
  *     el.classList.toggle('indoors'/'indoors-private') — controls CSS visibility
  */
 let _rafFrameCount = 0;
+
+// ── Obstacle avoidance ─────────────────────────────────────────────────────
+// Obstacles in state.obstacles are stored directly in sim-px: { x, y, r, type }
+// This avoids any coordinate-system mismatch between Babylon world units and
+// the 2-D simulation pixel space.
+
+/**
+ * Nudge gator p out of any circular obstacle and clamp to the stage wall.
+ * All values are in sim-px. Called every rAF frame for moving gators.
+ */
+// Minimum pixel gap between a gator's sprite edge and the stage wall (3 feet × 20 px/ft).
+const WALL_CLEAR = 60;
+
+function _pushOutOfObstacles(p) {
+    const GATOR_R = GATOR_SIZE / 2;
+    // Wall: keep sprite edge at least WALL_CLEAR (3 ft) from each wall.
+    // p.x is the top-left corner, so right-edge = p.x + GATOR_SIZE.
+    const { W, H } = stageBounds();
+    p.x = Math.max(WALL_CLEAR, Math.min(W - GATOR_SIZE - WALL_CLEAR, p.x));
+    p.y = Math.max(WALL_CLEAR, Math.min(H - GATOR_SIZE - WALL_CLEAR, p.y));
+
+    const pcx = p.x + GATOR_R;
+    const pcy = p.y + GATOR_R;
+
+    for (const obs of state.obstacles) {
+        const ddx = pcx - obs.x;
+        const ddy = pcy - obs.y;
+        const dd  = Math.sqrt(ddx * ddx + ddy * ddy);
+        const minD = obs.r + GATOR_R;
+        if (dd < minD && dd > 0.001) {
+            const push = (minD - dd) / dd;
+            p.x += ddx * push;
+            p.y += ddy * push;
+        }
+    }
+}
+
+/**
+ * Returns true if a gator centred at (cx, cy) would overlap any obstacle.
+ */
+function _isInsideObstacle(cx, cy) {
+    const GATOR_R = GATOR_SIZE / 2;
+    for (const obs of state.obstacles) {
+        const ddx = cx - obs.x, ddy = cy - obs.y;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < obs.r + GATOR_R) return true;
+    }
+    return false;
+}
+
 function gameLoop() {
     if (!state.paused) {
         _rafFrameCount++;
@@ -880,10 +983,10 @@ function gameLoop() {
                 if (partner && p.id < partner.id) {
                     // Only the lower-id gator computes the facing positions (once per frame)
                     // to avoid both gators fighting over the midpoint calculation.
-                    const cx2 = GATOR_SIZE / 2;
                     const mx = (p.x + partner.x) / 2;
                     const my = (p.y + partner.y) / 2;
-                    const faceGap = GATOR_SIZE * 1.2;
+                    // 5 feet (100px) gap between sprite edges → each stands 110px from midpoint.
+                    const faceGap = (GATOR_SIZE + 100) / 2;
                     // Determine facing axis: if mostly horizontal, stand side-by-side
                     const rawDx = partner.x - p.x;
                     const rawDy = partner.y - p.y;
@@ -921,12 +1024,20 @@ function gameLoop() {
                 const d  = Math.sqrt(dx*dx+dy*dy);
                 if (d <= p.speed) {
                     p.x = p.targetX; p.y = p.targetY;
+                    // Pick a target that respects the wall clearance and avoids obstacles.
                     const { W: bW, H: bH } = stageBounds();
-                    p.targetX = rndF(bW); p.targetY = rndF(bH);
+                    let tx, ty, tries = 0;
+                    do {
+                        tx = WALL_CLEAR + Math.random() * (bW - GATOR_SIZE - WALL_CLEAR * 2);
+                        ty = WALL_CLEAR + Math.random() * (bH - GATOR_SIZE - WALL_CLEAR * 2);
+                        tries++;
+                    } while (_isInsideObstacle(tx + GATOR_SIZE/2, ty + GATOR_SIZE/2) && tries < 15);
+                    p.targetX = tx; p.targetY = ty;
                 } else {
                     p.x = Math.max(0, Math.min(W, p.x+(dx/d)*p.speed));
                     p.y = Math.max(0, Math.min(H, p.y+(dy/d)*p.speed));
                 }
+                _pushOutOfObstacles(p);
             }
 
             const el = document.getElementById(`gator-${p.id}`);
@@ -1075,6 +1186,33 @@ function spawnGators() {
 
     // Reset game state
     resetGameState();
+
+    // ── Pre-populate obstacles in sim-px so 2-D collision works immediately ──
+    // These positions mirror the rock & tree positions used by gatorBabylon.js.
+    // BABYLON_SCALE = 0.1; sim-px = world-unit / 0.1 = world-unit * 10
+    const _B2S = 10; // Babylon world-unit → sim-px
+    state.obstacles = [];
+
+    // Rocks (world-unit coords from buildRocks, using fixed median size ≈ 1.1)
+    const _rockDefs = [
+        [8,12],[15,70],[110,8],[108,70],[3,40],
+        [118,42],[35,5],[82,75],[55,38],[72,18],
+        [25,62],[95,30],[42,72],[68,8],
+    ];
+    _rockDefs.forEach(([wx, wz]) => {
+        state.obstacles.push({ x: wx * _B2S, y: wz * _B2S, r: 20, type: 'rock' });
+    });
+
+    // Island-perimeter trees – use the same fixed list as gatorBabylon.js
+    ISLAND_TREE_POSITIONS.forEach(([wx, wz]) => {
+        state.obstacles.push({ x: wx * _B2S, y: wz * _B2S, r: 18, type: 'tree' });
+    });
+
+    // Houses (from state.houses which was just populated by culdesacLayout)
+    state.houses.forEach(h => {
+        // house half-diagonal ≈ 85px (HOUSE_W=12, HOUSE_D=12 world units → 120×120 sim-px)
+        state.obstacles.push({ x: h.x, y: h.y, r: 90, type: 'house' });
+    });
 
     // Sync Babylon.js 3D meshes with the new gator + house roster
     try { syncBabylonMeshes(); } catch (e) { console.warn('[babylon] syncBabylonMeshes failed', e); }

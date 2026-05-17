@@ -64,6 +64,21 @@ import { TICK_MS, MAX_CONCURRENT_CONVERSATIONS } from './gameConfig.js';
 // Key format: "min(idA,idB):max(idA,idB):fullconv"
 const _pending = new Map();
 
+// _povChoiceHandler: optional callback set by gatorBabylon.js.
+// Signature: (options: string[], callback: (chosenText: string) => void) => void
+// When set and the POV gator is about to speak, playback pauses and this
+// handler is called so the player can choose a response.
+let _povChoiceHandler = null;
+
+/**
+ * Register a UI handler for POV response choices.
+ * Called once from gatorBabylon.js at init to avoid circular imports.
+ * @param {Function} handler - fn(options: string[], onPick: (text: string) => void)
+ */
+export function setPovChoiceHandler(handler) {
+    _povChoiceHandler = handler;
+}
+
 // _activeConversations: count of AI conversations currently in-flight or draining.
 // A new conversation can start as long as this is below MAX_CONCURRENT_CONVERSATIONS.
 let _activeConversations = 0;
@@ -236,14 +251,67 @@ function _drainNextConvTurn(initiator, responder) {
     const turns = initiator._convTurns;
     if (!turns || initiator._convTurnIndex >= turns.length) return;
 
-    // Advance the cursor and get the current turn object.
-    const turn = turns[initiator._convTurnIndex++];
+    // Peek at the next turn WITHOUT advancing the index yet.
+    const turn = turns[initiator._convTurnIndex];
     const isPrivate = !!initiator._convIsPrivate;
 
     // Determine who is speaking vs. who is listening this turn.
     const speaker  = turn.speakerGatorId === initiator.id ? initiator : responder;
     const listener = turn.speakerGatorId === initiator.id ? responder : initiator;
 
+    // ── POV response-choice gate ────────────────────────────────────────────
+    // If this turn belongs to the player-controlled gator and a choice UI is
+    // registered, pause here and let the player pick a response.  Playback
+    // resumes only after the player selects an option.
+    if (_povChoiceHandler && state.povGatorId != null && speaker.id === state.povGatorId) {
+        const aiLine = turn.speech ?? '';
+        // Build 2-3 choices from the AI-generated line.
+        const options = _buildChoiceOptions(aiLine, turn.thought ?? null);
+        _povChoiceHandler(options, (chosenText) => {
+            // Advance past this turn now that the player has chosen.
+            initiator._convTurnIndex++;
+            // Override the speech with the player's selection.
+            turn.speech = chosenText;
+            _playTurn(initiator, responder, turn, isPrivate, speaker, listener);
+        });
+        return; // Halt automatic playback — resume is triggered by the choice callback.
+    }
+
+    // Normal (non-POV) turn: advance index and play immediately.
+    initiator._convTurnIndex++;
+    _playTurn(initiator, responder, turn, isPrivate, speaker, listener);
+}
+
+/**
+ * Generate 2-3 response choices from an AI-generated line.
+ * Option 0: the AI line verbatim.
+ * Option 1: a shorter / more casual rephrase (strip trailing clauses).
+ * Option 2: a skeptical/guarded version.
+ * @param {string} aiLine
+ * @param {string|null} thought
+ * @returns {string[]}
+ */
+function _buildChoiceOptions(aiLine, thought) {
+    const options = [aiLine];
+
+    // Option 2: shortened — take up to first sentence or first 60 chars.
+    const shortMatch = aiLine.match(/^[^.!?]+[.!?]/);
+    const shortLine = shortMatch ? shortMatch[0].trim() : (aiLine.length > 60 ? aiLine.slice(0, 57).trim() + '…' : null);
+    if (shortLine && shortLine !== aiLine) options.push(shortLine);
+
+    // Option 3: guarded — prefix with hedging phrase.
+    const hedges = ['Hmm… ', 'I\'m not sure… ', 'Hard to say… ', 'Maybe, but… '];
+    const hedge = hedges[Math.floor(Math.random() * hedges.length)];
+    // Take first sentence of aiLine for the guarded version.
+    const base = shortMatch ? shortMatch[0].replace(/[.!?]$/, '') : aiLine.slice(0, 50);
+    const guardedLine = hedge + base.charAt(0).toLowerCase() + base.slice(1) + '.';
+    if (guardedLine !== aiLine) options.push(guardedLine);
+
+    return options;
+}
+
+/** Shared turn-display logic used by both normal and POV paths. */
+function _playTurn(initiator, responder, turn, isPrivate, speaker, listener) {
     // Update the speaker's visible speech bubble and log the chat.
     if (turn.speech && turn.speech.length > 0) {
         speaker.message = turn.speech;
@@ -257,7 +325,7 @@ function _drainNextConvTurn(initiator, responder) {
         speaker.thought = turn.thought;
     }
 
-    if (initiator._convTurnIndex < turns.length) {
+    if (initiator._convTurnIndex < initiator._convTurns.length) {
         // Schedule the next turn with a 2.2–4 second human-feeling delay.
         const ms = 2200 + Math.random() * 1800;
         setTimeout(() => _drainNextConvTurn(initiator, responder), ms);
