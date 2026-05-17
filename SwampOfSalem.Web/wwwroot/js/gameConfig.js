@@ -79,6 +79,10 @@ export const HAT_STYLES     = G.HAT_STYLES;
 export const SHIRT_COLORS   = G.SHIRT_COLORS;
 export const HOUSE_COLORS   = G.HOUSE_COLORS;
 
+// ── Movement bounds ─────────────────────────────────────────────
+export const TOWN_RADIUS_GUARD = G.TOWN_RADIUS_GUARD;
+export const HOUSE_RING_RADIUS = G.HOUSE_RING_RADIUS;
+
 // ── Relationships ─────────────────────────────────────────────
 export const LIAR_CHANCE    = G.LIAR_CHANCE;
 export const COMPAT         = G.COMPAT;

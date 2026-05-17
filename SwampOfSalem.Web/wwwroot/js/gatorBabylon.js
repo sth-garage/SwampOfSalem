@@ -93,8 +93,8 @@ let _canvas = null;           // The <canvas> element the Babylon engine draws i
 const MANUAL_RESUME_MS  = 4000;    // ms of inactivity before auto-follow resumes
 const FREE_CAM_SPEED    = 12;      // world units per second for WASD movement
 const MOUSE_SENSITIVITY = 0.0020;  // radians of camera rotation per pixel dragged
-const JUMP_FORCE        = 3.5;     // initial upward velocity applied at jump (world units/sec) — ~2 ft hop
-const GRAVITY           = 18;      // downward acceleration rate (world units/sec²)
+const JUMP_FORCE        = 6.0;     // initial upward velocity applied at jump — yields ~2 s airtime
+const GRAVITY           = 6.0;     // downward acceleration rate (world units/sec²) — 2×JUMP_FORCE/GRAVITY = 2 s
 
 const _keys = new Set();         // Set of KeyboardEvent.code strings currently held down.
 let _manualYaw   = 0;            // Current horizontal camera angle (radians).
@@ -112,6 +112,9 @@ function _dismissCtxMenu() { if (_ctxMenu) { _ctxMenu.remove(); _ctxMenu = null;
 // Attack cooldown: one bite per 5 seconds (shared by context menu and HUD buttons)
 let _lastBiteMs         = 0;
 const BITE_COOLDOWN_MS  = 5000;
+
+// POV pause — when true, the Babylon render loop still runs but gator positions freeze
+let _povPaused = false;
 
 function _enterManual() {
     _manualActive = true;
@@ -265,14 +268,22 @@ function _applyManualCamera(dt) {
             // Convert Babylon world units → sim pixels (SCALE = 0.1)
             const rawSimX = camera.position.x / SCALE;
             const rawSimZ = camera.position.z / SCALE;
-            // Clamp to wall-safe area
+            // Clamp to 200-px radius from town centre
             const { W: sW, H: sH } = stageBounds();
-            const WCLEAR = 60;
-            activeGator.x = Math.max(WCLEAR, Math.min(sW - WCLEAR, rawSimX));
-            activeGator.y = Math.max(WCLEAR, Math.min(sH - WCLEAR, rawSimZ));
+            const tcx = sW * 0.5, tcy = sH * 0.5;
+            const MAX_RADIUS = 200;
+            const ddx = rawSimX - tcx, ddz = rawSimZ - tcy;
+            const dist = Math.sqrt(ddx * ddx + ddz * ddz);
+            if (dist > MAX_RADIUS) {
+                const scale = MAX_RADIUS / dist;
+                activeGator.x = tcx + ddx * scale;
+                activeGator.y = tcy + ddz * scale;
+            } else {
+                activeGator.x = rawSimX;
+                activeGator.y = rawSimZ;
+            }
             activeGator.targetX = activeGator.x;
             activeGator.targetY = activeGator.y;
-            // Clamp camera back if we hit the wall
             camera.position.x = activeGator.x * SCALE;
             camera.position.z = activeGator.y * SCALE;
         }
@@ -468,71 +479,11 @@ function buildScene() {
         pad.material   = lilyMat;
     });
 
-    buildTrees();
     buildReeds();
     buildRocks();
-    buildWall();
 }
 
-// ── Village perimeter wall ────────────────────────────────────────────────────
-// Four stone walls run along the edges of the island (x: 0–120, z: 0–80).
-// Each wall is visible and registered in state.obstacles so the 2-D simulation
-// movement code can steer gators away from it.
-function buildWall() {
-    const BABYLON = window.BABYLON;
-
-    const stoneMat = new BABYLON.StandardMaterial('wallStoneMat', scene);
-    stoneMat.diffuseColor  = new BABYLON.Color3(0.42, 0.38, 0.30);
-    stoneMat.specularColor = new BABYLON.Color3(0.12, 0.10, 0.08);
-    stoneMat.specularPower = 16;
-
-    const capMat = new BABYLON.StandardMaterial('wallCapMat', scene);
-    capMat.diffuseColor = new BABYLON.Color3(0.30, 0.28, 0.22);
-
-    const WALL_H   = 2.8;   // wall height (world units)
-    const WALL_T   = 0.9;   // wall thickness
-    const ISLAND_X = 120;
-    const ISLAND_Z = 80;
-    const OFFSET   = 1.0;   // how far inward from the island edge the wall sits
-
-    // Four segments: North (z≈0), South (z≈80), West (x≈0), East (x≈120)
-    const segments = [
-        // [cx, cz, width, depth, label]
-        [ISLAND_X / 2, OFFSET,          ISLAND_X + WALL_T * 2, WALL_T, 'wallN'],
-        [ISLAND_X / 2, ISLAND_Z - OFFSET, ISLAND_X + WALL_T * 2, WALL_T, 'wallS'],
-        [OFFSET,          ISLAND_Z / 2, WALL_T, ISLAND_Z - OFFSET * 2, 'wallW'],
-        [ISLAND_X - OFFSET, ISLAND_Z / 2, WALL_T, ISLAND_Z - OFFSET * 2, 'wallE'],
-    ];
-
-    segments.forEach(([cx, cz, w, d, name]) => {
-        const wall = BABYLON.MeshBuilder.CreateBox(name,
-            { width: w, height: WALL_H, depth: d }, scene);
-        wall.position = new BABYLON.Vector3(cx, WALL_H / 2, cz);
-        wall.material = stoneMat;
-
-        // Crenellation cap on top
-        const cap = BABYLON.MeshBuilder.CreateBox(`${name}_cap`,
-            { width: w, height: WALL_T * 0.4, depth: d + WALL_T * 0.3 }, scene);
-        cap.position = new BABYLON.Vector3(cx, WALL_H + WALL_T * 0.2, cz);
-        cap.material = capMat;
-    });
-
-    // Corner towers
-    const towerR = WALL_T * 1.4;
-    const towerH = WALL_H + 1.2;
-    const corners = [
-        [OFFSET, OFFSET],
-        [ISLAND_X - OFFSET, OFFSET],
-        [OFFSET, ISLAND_Z - OFFSET],
-        [ISLAND_X - OFFSET, ISLAND_Z - OFFSET],
-    ];
-    corners.forEach(([cx, cz], i) => {
-        const tower = BABYLON.MeshBuilder.CreateCylinder(`tower${i}`,
-            { diameter: towerR * 2, height: towerH, tessellation: 8 }, scene);
-        tower.position = new BABYLON.Vector3(cx, towerH / 2, cz);
-        tower.material = stoneMat;
-    });
-}
+// buildSwampBoundary removed — no walls of any form.
 
 // ── Reed clusters along water edges ─────────────────────────────────────────
 function buildReeds() {
@@ -610,85 +561,8 @@ function buildRocks() {
     });
 }
 
-// Fixed island-tree positions (world units) – shared with 2-D collision system.
-// Exported so simulation.js can mirror them without re-generating randomly.
-export const ISLAND_TREE_POSITIONS = [
-    // perimeter: north edge
-    [8,3],[20,4],[34,2],[48,4],[62,3],[76,4],[90,2],[104,3],[116,4],
-    // perimeter: south edge
-    [8,74],[20,75],[34,73],[48,75],[62,74],[76,75],[90,73],[104,74],
-    // perimeter: west edge
-    [3,10],[3,22],[3,36],[3,50],[3,64],
-    // perimeter: east edge
-    [117,10],[117,22],[117,36],[117,50],[117,64],
-    // interior scatter
-    [22,18],[88,18],[40,58],[100,58],[60,34],[48,62],[72,48],[30,42],
-];
-
-function buildTrees() {
-    const BABYLON = window.BABYLON;
-
-    const trunkMat = new BABYLON.StandardMaterial('trunkMat', scene);
-    trunkMat.diffuseColor = new BABYLON.Color3(0.22, 0.14, 0.07);
-
-    // Several shades of foliage for variety
-    const leafMats = [
-        (() => { const m = new BABYLON.StandardMaterial('leaf0', scene); m.diffuseColor = new BABYLON.Color3(0.10, 0.28, 0.10); return m; })(),
-        (() => { const m = new BABYLON.StandardMaterial('leaf1', scene); m.diffuseColor = new BABYLON.Color3(0.14, 0.34, 0.12); return m; })(),
-        (() => { const m = new BABYLON.StandardMaterial('leaf2', scene); m.diffuseColor = new BABYLON.Color3(0.08, 0.22, 0.09); return m; })(),
-        (() => { const m = new BABYLON.StandardMaterial('leaf3', scene); m.diffuseColor = new BABYLON.Color3(0.20, 0.38, 0.10); return m; })(),
-        (() => { const m = new BABYLON.StandardMaterial('leaf4', scene); m.diffuseColor = new BABYLON.Color3(0.28, 0.40, 0.08); return m; })(), // yellowy dead
-    ];
-
-    const positions = [];
-
-    // ── Dense far-bank forest beyond the moat ────────────────────────────
-    // North bank (z < -8)
-    for (let i = 0; i < 60; i++) positions.push([Math.random() * 200 - 40, -12 - Math.random() * 28, true]);
-    // South bank (z > 88)
-    for (let i = 0; i < 60; i++) positions.push([Math.random() * 200 - 40,  88 + Math.random() * 28, true]);
-    // West bank (x < -8)
-    for (let i = 0; i < 40; i++) positions.push([-12 - Math.random() * 22, Math.random() * 100 - 10, true]);
-    // East bank (x > 128)
-    for (let i = 0; i < 40; i++) positions.push([128 + Math.random() * 22, Math.random() * 100 - 10, true]);
-
-    // ── Sparse trees on the island itself ─────────────────────────────────
-    // Use the fixed ISLAND_TREE_POSITIONS so 2-D simulation can mirror them.
-    ISLAND_TREE_POSITIONS.forEach(([x, z]) => positions.push([x, z, false]));
-
-
-    positions.forEach(([x, z, isFarBank], idx) => {
-        const tall = isFarBank;
-        const h    = tall ? 6 + Math.random() * 8 : 3.5 + Math.random() * 4;
-        const lmat = leafMats[Math.floor(Math.random() * leafMats.length)];
-
-        const trunk = BABYLON.MeshBuilder.CreateCylinder(`trunk${idx}`,
-            { diameterTop: 0.45, diameterBottom: 0.9, height: h, tessellation: 6 }, scene);
-        trunk.position = new BABYLON.Vector3(x, h / 2, z);
-        trunk.material = trunkMat;
-
-        // Two canopy layers for a fuller look
-        const leafH1 = (tall ? 4.5 : 3) + Math.random() * 2;
-        const leaf1 = BABYLON.MeshBuilder.CreateCylinder(`leaf${idx}a`,
-            { diameterTop: 0, diameterBottom: (1.6 + Math.random()) * (tall ? 3 : 2), height: leafH1, tessellation: 7 }, scene);
-        leaf1.position = new BABYLON.Vector3(x, h + leafH1 / 2 - 0.8, z);
-        leaf1.material = lmat;
-
-        if (Math.random() > 0.4) {
-            const leafH2 = leafH1 * 0.65;
-            const leaf2 = BABYLON.MeshBuilder.CreateCylinder(`leaf${idx}b`,
-                { diameterTop: 0, diameterBottom: (1.0 + Math.random()) * (tall ? 2.2 : 1.5), height: leafH2, tessellation: 7 }, scene);
-            leaf2.position = new BABYLON.Vector3(x, h + leafH1 - 0.3 + leafH2 / 2 - 0.4, z);
-            leaf2.material = leafMats[(leafMats.indexOf(lmat) + 1) % leafMats.length];
-        }
-
-        // Register island-side trees as circular obstacles in sim-px
-        if (!isFarBank) {
-            const trunkR = (0.45 + 0.5) * 10;
-            state.obstacles.push({ x: x * 10, y: z * 10, r: trunkR, type: 'tree' });
-        }
-    });
-}
+// buildTrees removed — trees eliminated per design.
+export const ISLAND_TREE_POSITIONS = []; // kept for import compatibility
 
 function buildHouses() {
     const BABYLON = window.BABYLON;
@@ -1399,37 +1273,57 @@ export async function initBabylon(container) {
     // Enter manual mode immediately — the user always drives the camera in POV.
     _manualActive = true;
 
+    // ── HUD button wiring ──────────────────────────────────────────────────
+    const _hudPauseBtn    = document.getElementById('pov-hud-pause-btn');
+    const _hudRelDeltaBtn = document.getElementById('pov-hud-rel-delta-btn');
+
+    _hudPauseBtn?.addEventListener('click', () => {
+        hudPausePov();
+        _hudPauseBtn.textContent = _povPaused ? '▶ Resume' : '⏸ Pause';
+    });
+
+    _hudRelDeltaBtn?.addEventListener('click', () => {
+        state.showRelDelta = !state.showRelDelta;
+        _hudRelDeltaBtn.textContent = `💬 Rel: ${state.showRelDelta ? 'ON' : 'OFF'}`;
+        // Keep the 2D toggle button in sync if it exists
+        const btn2d = document.getElementById('relDeltaToggleBtn');
+        if (btn2d) btn2d.textContent = `\ud83d\udcac Rel. Changes: ${state.showRelDelta ? 'ON' : 'OFF'}`;
+    });
+
     engine.runRenderLoop(() => {
         if (!scene) return;
         if (state.houses.length > 0 && houseMeshes.length === 0) buildHouses();
         if (state.gators.length > 0) {
             const dt = engine.getDeltaTime() / 1000;
-            syncGatorMeshes(dt);
 
-            // ── Jump physics (independent of manual vs auto-follow) ──────────
-            if (_jumpVelocity !== 0 || _jumpY > 0) {
-                _jumpVelocity -= GRAVITY * dt;
-                _jumpY += _jumpVelocity * dt;
-                if (_jumpY < 0) { _jumpY = 0; _jumpVelocity = 0; }
+            if (!_povPaused) {
+                syncGatorMeshes(dt);
+
+                // ── Jump physics ─────────────────────────────────────────────
+                if (_jumpVelocity !== 0 || _jumpY > 0) {
+                    _jumpVelocity -= GRAVITY * dt;
+                    _jumpY += _jumpVelocity * dt;
+                    if (_jumpY < 0) { _jumpY = 0; _jumpVelocity = 0; }
+                }
+
+                if (_manualActive) {
+                    _applyManualCamera(dt);
+                } else {
+                    updateCamera();
+                }
+
+                // Apply jump height on top of whatever the camera system set Y to
+                if (_jumpY > 0) camera.position.y += _jumpY;
             }
-
-            if (_manualActive) {
-                _applyManualCamera(dt);
-            } else {
-                updateCamera();
-            }
-
-            // Apply jump height on top of whatever the camera system set Y to
-            if (_jumpY > 0) camera.position.y += _jumpY;
 
             const alive = living();
             const activeGator = alive[activeGatorIndex % Math.max(alive.length, 1)] ?? null;
-            // Keep shared state in sync so simulation.js can skip this gator for conversations
             state.povGatorId = activeGator?.id ?? null;
             updatePovBubbles(activeGator);
-            // Update HUD label
             const label = document.getElementById('babylon-pov-gator-label');
             if (label && activeGator) label.textContent = `🐊 ${activeGator.name}`;
+            const pauseBtn = document.getElementById('pov-hud-pause-btn');
+            if (pauseBtn) pauseBtn.textContent = _povPaused ? '▶ Resume' : '⏸ Pause';
         }
         scene.render();
     });
@@ -1469,9 +1363,10 @@ function _showPovChoices(options, onPick) {
     panel.appendChild(label);
 
     options.forEach(text => {
+        const isIgnore = text === '__IGNORE__';
         const btn = document.createElement('button');
-        btn.className = 'pov-choice-btn';
-        btn.textContent = text;
+        btn.className = isIgnore ? 'pov-choice-btn pov-choice-ignore' : 'pov-choice-btn';
+        btn.textContent = isIgnore ? '🚶 Ignore (walk away)' : text;
         btn.addEventListener('click', () => {
             _dismissPovChoices();
             onPick(text);
@@ -1549,6 +1444,115 @@ function _showBiteToast(container, text) {
  * Two-step attacker → victim picker at module scope.
  * povGator may be null (HUD Make Attack with no context gator selected).
  */
+// ── Influence system ─────────────────────────────────────────────────────────
+// Full catalogue of influence types.  Six are chosen at random each time the
+// picker is opened so the options feel dynamic and replayable.
+const _INFLUENCE_TYPES = [
+    { emoji: '💚', name: 'Likes',       delta: [25,  45]  },
+    { emoji: '❤️',  name: 'Adores',     delta: [55,  75]  },
+    { emoji: '🤝', name: 'Warms Up To', delta: [15,  30]  },
+    { emoji: '🫂', name: 'Befriends',   delta: [40,  60]  },
+    { emoji: '🌟', name: 'Admires',     delta: [35,  55]  },
+    { emoji: '🌿', name: 'Trusts',      delta: [20,  40]  },
+    { emoji: '💔', name: 'Dislikes',    delta: [-25, -40] },
+    { emoji: '😤', name: 'Resents',     delta: [-35, -55] },
+    { emoji: '🖤', name: 'Hates',       delta: [-55, -75] },
+    { emoji: '😱', name: 'Fears',       delta: [-60, -80] },
+    { emoji: '🕵️', name: 'Suspects',   delta: [-15, -30] },
+    { emoji: '😒', name: 'Ignores',     delta: [-10, -20] },
+];
+
+/** Apply one influence step to g1's feelings toward g2. Returns { prev, next, delta }. */
+function _applyInfluence(g1, g2, inf) {
+    g1.relations          ??= {};
+    g1.perceivedRelations ??= {};
+    const [lo, hi] = inf.delta;
+    const sign  = lo < 0 ? -1 : 1;
+    const mag   = Math.abs(lo) + Math.floor(Math.random() * (Math.abs(hi) - Math.abs(lo) + 1));
+    const delta = sign * mag;
+    const prev  = g1.relations[g2.id] ?? 0;
+    const next  = Math.max(-100, Math.min(100, prev + delta));
+    g1.relations[g2.id]          = next;
+    g1.perceivedRelations[g2.id] = next;
+    return { prev, next, delta };
+}
+
+/** Three-step influence picker: pick g1 → pick influence type → pick g2 → apply. */
+function _showInfluencePicker(container) {
+    const existing = container.querySelector('.pov-influence-picker');
+    if (existing) existing.remove();
+
+    const allGators = living();
+    if (allGators.length < 2) {
+        _showBiteToast(container, '⚠️ Need at least 2 gators!');
+        return;
+    }
+
+    const picker = document.createElement('div');
+    picker.className = 'pov-make-attack-picker pov-influence-picker';
+
+    function renderStep(title, options, onSelect) {
+        picker.innerHTML = `<div class="pov-picker-title">${title}</div>`;
+        for (const opt of options) {
+            const btn = document.createElement('button');
+            btn.className = 'pov-picker-btn';
+            btn.textContent = `${opt.emoji ?? '🐊'} ${opt.name}`;
+            btn.addEventListener('click', ev => { ev.stopPropagation(); onSelect(opt); });
+            picker.appendChild(btn);
+        }
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'pov-picker-btn pov-picker-cancel';
+        cancelBtn.textContent = '✖ Cancel';
+        cancelBtn.addEventListener('click', ev => { ev.stopPropagation(); picker.remove(); });
+        picker.appendChild(cancelBtn);
+    }
+
+    // Step 1 — pick the influencer
+    renderStep('🧠 Who will feel something new?',
+        allGators.map(g => ({ emoji: g.emoji ?? '🐊', name: g.name, _g: g })),
+        ({ _g: g1 }) => {
+            // Step 2 — pick influence type (6 random from full catalogue)
+            const options = [..._INFLUENCE_TYPES]
+                .sort(() => Math.random() - 0.5)
+                .slice(0, 6);
+            renderStep(`🧠 How does ${g1.name} feel?`, options, inf => {
+                // Step 3 — pick the target
+                const targets = living().filter(g => g.id !== g1.id);
+                if (targets.length === 0) {
+                    picker.remove();
+                    _showBiteToast(container, '⚠️ No other gators to target!');
+                    return;
+                }
+                renderStep(
+                    `${inf.emoji} ${g1.name} ${inf.name}\u2026 toward who?`,
+                    targets.map(g => ({ emoji: g.emoji ?? '🐊', name: g.name, _g: g })),
+                    ({ _g: g2 }) => {
+                        picker.remove();
+                        const { delta } = _applyInfluence(g1, g2, inf);
+                        const dir = delta >= 0 ? '▲' : '▼';
+                        _showBiteToast(container,
+                            `${inf.emoji} ${g1.name} now ${inf.name} ${g2.name} (${dir}${Math.abs(delta)})`);
+                    }
+                );
+            });
+        }
+    );
+
+    picker.style.left = '50%';
+    picker.style.transform = 'translateX(-50%)';
+    picker.style.top = '80px';
+    container.appendChild(picker);
+
+    setTimeout(() => {
+        window.addEventListener('click', function dismissInfluence(ev) {
+            if (!picker.contains(ev.target)) {
+                picker.remove();
+                window.removeEventListener('click', dismissInfluence, true);
+            }
+        }, { capture: true });
+    }, 0);
+}
+
 function _showMakeAttackPicker(container, povGator, _targetGator) {
     const existing = container.querySelector('.pov-make-attack-picker');
     if (existing) existing.remove();
@@ -1742,13 +1746,74 @@ export function hudAttack() {
  * attacker → victim picker regardless of whether a target is active.
  */
 export function hudMakeAttack() {
-    const container = _canvas?.parentElement;
+    const container = _canvas?.parentElement ?? document.getElementById('world');
     if (!container) return;
     const alive = living();
     const povGator = alive[activeGatorIndex % Math.max(alive.length, 1)] ?? null;
     // Pass null as targetGator so the picker shows all gators as potential attackers
     // except the POV gator (the player), matching the existing Make Attack UX.
     _showMakeAttackPicker(container, povGator, null);
+}
+
+/**
+ * HUD Influence button — three-step picker:
+ *   1. Choose the influencer (g1)
+ *   2. Choose an influence type (6 randomised options)
+ *   3. Choose the target (g2)
+ * Applies the relation delta immediately to g1's feelings toward g2.
+ */
+export function hudInfluence() {
+    const container = _canvas?.parentElement ?? document.getElementById('world');
+    if (!container) return;
+    _showInfluencePicker(container);
+}
+
+/** Toggle POV pause — freezes gator movement / camera tracking while canvas still renders. */
+export function hudPausePov() {
+    _povPaused = !_povPaused;
+}
+
+// ── Relationship delta floating labels (POV) ─────────────────────────────────
+// Maps gatorId → { div, expiry } for labels floating above their heads.
+const _relDeltaDivs = new Map();
+
+/**
+ * Show a floating relationship-change label above a gator's head in the POV view.
+ * Called by simulation.js / agentQueue.js after any relation change.
+ * @param {number} gatorId  - Whose head to place the label above.
+ * @param {string} text     - e.g. "Hates that sports team – Dislike +25"
+ * @param {number} delta    - Numeric delta; negative = bad (red), positive = good (green).
+ */
+export function showRelDeltaLabel(gatorId, text, delta) {
+    if (!state.showRelDelta) return;
+    const container = _canvas?.parentElement;
+    if (!container) return;
+    // Remove any existing label for this gator
+    const existing = _relDeltaDivs.get(gatorId);
+    if (existing) { existing.div.remove(); _relDeltaDivs.delete(gatorId); }
+
+    const div = document.createElement('div');
+    div.className = 'pov-rel-delta ' + (delta >= 0 ? 'pov-rel-delta-pos' : 'pov-rel-delta-neg');
+    div.textContent = text;
+    container.appendChild(div);
+
+    // Position it on the next frame once we can project the head
+    const positionLabel = () => {
+        if (!div.isConnected) return;
+        const sp = _projectHead(gatorId);
+        if (sp) {
+            div.style.left = `${sp.x}px`;
+            div.style.top  = `${sp.y - 60}px`;
+        }
+    };
+    requestAnimationFrame(positionLabel);
+
+    // Auto-remove after 3 s
+    const timer = setTimeout(() => {
+        div.style.opacity = '0';
+        setTimeout(() => { div.remove(); _relDeltaDivs.delete(gatorId); }, 600);
+    }, 3000);
+    _relDeltaDivs.set(gatorId, { div, timer });
 }
 
 function onResize() {

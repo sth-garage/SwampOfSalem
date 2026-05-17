@@ -16,8 +16,8 @@ public static class AppearanceConstants
 
     public static readonly string[] HatStyles =
     [
-        "tophat", "sunglasses", "wig", "bowtie", "crown",
-        "bandana", "hornplate", "spines", "monocle", "crest"
+        "cowboy", "cowboy", "cowboy", "cowboy", "cowboy",
+        "cowboy", "cowboy", "cowboy", "cowboy", "cowboy"
     ];
 
     public static readonly string[] ShirtColors =

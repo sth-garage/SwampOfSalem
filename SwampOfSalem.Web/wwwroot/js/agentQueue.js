@@ -58,6 +58,9 @@ import { state } from './state.js';
 import { living } from './gator.js';
 import { logChat } from './simulation.js';
 import { TICK_MS, MAX_CONCURRENT_CONVERSATIONS } from './gameConfig.js';
+import { calcTopicRelationDelta } from './helpers.js';
+import { showRelDeltaLabel2D } from './rendering.js';
+import { showRelDeltaLabel } from './gatorBabylon.js';
 
 // _pending: Map of conversation keys → in-flight Promise.
 // Prevents the same pair from sending two concurrent requests.
@@ -265,16 +268,21 @@ function _drainNextConvTurn(initiator, responder) {
     // resumes only after the player selects an option.
     if (_povChoiceHandler && state.povGatorId != null && speaker.id === state.povGatorId) {
         const aiLine = turn.speech ?? '';
-        // Build 2-3 choices from the AI-generated line.
+        // Build 2-3 choices from the AI-generated line, plus always add Ignore.
         const options = _buildChoiceOptions(aiLine, turn.thought ?? null);
         _povChoiceHandler(options, (chosenText) => {
-            // Advance past this turn now that the player has chosen.
+            if (chosenText === '__IGNORE__') {
+                // End the conversation — rude but valid
+                initiator._convTurns      = null;
+                initiator._convTurnIndex  = 0;
+                if (initiator._convOnComplete) initiator._convOnComplete();
+                return;
+            }
             initiator._convTurnIndex++;
-            // Override the speech with the player's selection.
             turn.speech = chosenText;
             _playTurn(initiator, responder, turn, isPrivate, speaker, listener);
         });
-        return; // Halt automatic playback — resume is triggered by the choice callback.
+        return;
     }
 
     // Normal (non-POV) turn: advance index and play immediately.
@@ -302,10 +310,12 @@ function _buildChoiceOptions(aiLine, thought) {
     // Option 3: guarded — prefix with hedging phrase.
     const hedges = ['Hmm… ', 'I\'m not sure… ', 'Hard to say… ', 'Maybe, but… '];
     const hedge = hedges[Math.floor(Math.random() * hedges.length)];
-    // Take first sentence of aiLine for the guarded version.
     const base = shortMatch ? shortMatch[0].replace(/[.!?]$/, '') : aiLine.slice(0, 50);
     const guardedLine = hedge + base.charAt(0).toLowerCase() + base.slice(1) + '.';
     if (guardedLine !== aiLine) options.push(guardedLine);
+
+    // Always last: Ignore — ends the conversation, a little rude
+    options.push('__IGNORE__');
 
     return options;
 }
@@ -318,6 +328,21 @@ function _playTurn(initiator, responder, turn, isPrivate, speaker, listener) {
         // logChat broadcasts the message to nearby observers and updates chatLogs.
         // isPrivate=true means no overhearing (hosting conversations are private).
         logChat(speaker, listener.id, turn.speech, turn.thought ?? null, isPrivate);
+
+        // ── Relationship-delta labels ────────────────────────────────────────
+        // Compute topic-based delta contributions and show them above the
+        // *listener* (the one being influenced by the speaker's words).
+        if (state.showRelDelta) {
+            try {
+                const { delta, reasons } = calcTopicRelationDelta(speaker, listener);
+                if (reasons.length > 0) {
+                    // Show only the first reason to keep the UI uncluttered
+                    const label = reasons[0];
+                    showRelDeltaLabel2D(listener, label, delta);
+                    showRelDeltaLabel(listener.id, label, delta);  // POV view
+                }
+            } catch (_) { /* helpers may not be ready if gators lack topicOpinions */ }
+        }
     }
 
     // Update the speaker's thought bubble (visible only in the info panel).

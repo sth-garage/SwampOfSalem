@@ -46,7 +46,8 @@ import {
     CONVICTION_THRESHOLD, GATOR_COUNT,
     PERSONALITY_EMOJI, DEBATE_SPEAK_COOLDOWN,
     BITE_DEATH_THRESHOLD, BITE_FLEE_MIN_MS, BITE_FLEE_EXTRA_MS,
-    BITE_COUNTER_CHANCE, LIAR_FLIP_CHANCE, CONVERSATION_EXTRA_TURNS
+    BITE_COUNTER_CHANCE, LIAR_FLIP_CHANCE, CONVERSATION_EXTRA_TURNS,
+    TOWN_RADIUS_GUARD
 } from './gameConfig.js';
 import {
     rnd, rndF, rndTicks, stageBounds, dist, weightedPick,
@@ -70,7 +71,7 @@ import {
     pinTooltip, refreshPinnedTooltip, cleanPrivateChatBubbles,
     syncBabylonMeshes
 } from './rendering.js';
-import { ISLAND_TREE_POSITIONS } from './gatorBabylon.js';
+import { ISLAND_TREE_POSITIONS, hudMakeAttack, hudInfluence } from './gatorBabylon.js';
 import { requestDialog, requestFullConversation, requestVote, recordMemory, drainNextConvTurn, setTickFunction } from './agentQueue.js';
 
 // -- Test Conversation -----------------------------------------
@@ -1109,20 +1110,20 @@ function tick() {
 
     const activePeople = living();
 
-    // -- Wall-bounce guard: push any gator that strayed past the wall-safe area back inside --
-    // Does NOT teleport — just clamps position and redirects their target inward.
+    // -- Radial guard: push any gator outside the configured town radius back toward centre --
     {
         const { W, H } = stageBounds();
-        const minX = WALL_CLEAR, maxX = W - GATOR_SIZE - WALL_CLEAR;
-        const minY = WALL_CLEAR, maxY = H - GATOR_SIZE - WALL_CLEAR;
         const cx = W / 2, cy = H / 2;
         for (const p of activePeople) {
-            let bounced = false;
-            if (p.x < minX) { p.x = minX; p.targetX = cx; bounced = true; }
-            if (p.x > maxX) { p.x = maxX; p.targetX = cx; bounced = true; }
-            if (p.y < minY) { p.y = minY; p.targetY = cy; bounced = true; }
-            if (p.y > maxY) { p.y = maxY; p.targetY = cy; bounced = true; }
-            if (bounced) { p.targetX ??= cx; p.targetY ??= cy; }
+            const dx = p.x - cx, dy = p.y - cy;
+            const d  = Math.sqrt(dx * dx + dy * dy);
+            if (d > TOWN_RADIUS_GUARD) {
+                const scale = TOWN_RADIUS_GUARD / d;
+                p.x = cx + dx * scale;
+                p.y = cy + dy * scale;
+                p.targetX = cx;
+                p.targetY = cy;
+            }
         }
     }
 
@@ -1361,6 +1362,7 @@ function tick() {
             ].join(' ');
 
             // On completion: apply topic-based relation delta, then release gators
+            // NOTE: No recordMemory here — private conversations are off the record.
             const _host = gator;
             const _guest = guest;
             const onHostingComplete = () => {
@@ -1368,8 +1370,6 @@ function tick() {
                 console.log(`[Hosting] ${_host.name} & ${_guest.name} topic delta: ${delta > 0 ? '+' : ''}${delta}`, reasons);
                 _host.history.push({ day: state.dayNumber, type: 'hosted', with: _guest.id, detail: `Hosted ${_guest.name}; topic bond: ${delta > 0 ? '+' : ''}${delta}` });
                 _guest.history.push({ day: state.dayNumber, type: 'visited', with: _host.id, detail: `Visited ${_host.name}; topic bond: ${delta > 0 ? '+' : ''}${delta}` });
-                recordMemory(_host.id, state.dayNumber, 'hosting_complete', `Finished hosting ${_guest.name}`, _guest.id);
-                recordMemory(_guest.id, state.dayNumber, 'visit_complete', `Finished visiting ${_host.name}`, _host.id);
                 _onConversationCompleted();
             };
 
@@ -1378,8 +1378,7 @@ function tick() {
             const openingLine = `Come on in, ${guest.name}!`;
             gator.message = openingLine;
             requestFullConversation(gator, guest, openingLine, 6, topicCtx, true, onHostingComplete);
-            recordMemory(gator.id, state.dayNumber, 'hosting', `Hosted ${guest.name} at home`, guest.id);
-            recordMemory(guest.id, state.dayNumber, 'visiting', `Visited ${gator.name} at home`, gator.id);
+            // Private conversations are not recorded as memories — gators won't reference them later.
 
                 updateHouseGuests();
                 continue;
@@ -1392,11 +1391,19 @@ function tick() {
         gator.message   = null;
         if (next === 'moving') {
             const { W, H } = stageBounds();
+            const cx = W / 2, cy = H / 2;
+            const TOWN_RADIUS = 200; // sim-px
             const WALL_MARGIN = 20;
             let tx, ty, tries = 0;
             do {
-                tx = WALL_MARGIN + rndF(W - WALL_MARGIN * 2);
-                ty = WALL_MARGIN + rndF(H - WALL_MARGIN * 2);
+                // Pick a random angle and radius within the town circle
+                const ang = Math.random() * Math.PI * 2;
+                const r   = Math.random() * TOWN_RADIUS;
+                tx = cx + Math.cos(ang) * r;
+                ty = cy + Math.sin(ang) * r;
+                // Clamp to wall-safe area as a secondary guard
+                tx = Math.max(WALL_MARGIN, Math.min(W - WALL_MARGIN, tx));
+                ty = Math.max(WALL_MARGIN, Math.min(H - WALL_MARGIN, ty));
                 tries++;
             } while (_isInsideObstacle(tx + GATOR_SIZE/2, ty + GATOR_SIZE/2) && tries < 15);
             gator.targetX = tx;
@@ -1557,9 +1564,9 @@ function gameLoop() {
                 } else {
                     // Face-to-face: host stands on one side of house centre, guest on the other
                     const h = state.houses[p.homeIndex];
-                    const faceGap = GATOR_SIZE * 0.9;
-                    const hostTargetX = h.doorX - faceGap;
-                    const hostTargetY = h.doorY - GATOR_SIZE;
+                    const faceGap = GATOR_SIZE * 0.65; // offset from pad centre
+                    const hostTargetX = h.x - faceGap - GATOR_SIZE / 2;
+                    const hostTargetY = h.y - GATOR_SIZE / 2;
                     const ddx = hostTargetX - p.x, ddy = hostTargetY - p.y;
                     const dd  = Math.sqrt(ddx*ddx + ddy*ddy);
                     if (dd > 2) {
@@ -1585,9 +1592,9 @@ function gameLoop() {
                 } else {
                     // Face-to-face: guest stands opposite the host
                     const h = state.houses[p.guestOfIndex];
-                    const faceGap = GATOR_SIZE * 0.9;
-                    const guestTargetX = h.doorX + faceGap;
-                    const guestTargetY = h.doorY - GATOR_SIZE;
+                    const faceGap = GATOR_SIZE * 0.65; // offset from pad centre
+                    const guestTargetX = h.x + faceGap - GATOR_SIZE / 2;
+                    const guestTargetY = h.y - GATOR_SIZE / 2;
                     const ddx = guestTargetX - p.x, ddy = guestTargetY - p.y;
                     const dd  = Math.sqrt(ddx*ddx + ddy*ddy);
                     if (dd > 2) {
@@ -1985,6 +1992,16 @@ export function initSimulation(agentInterop, dialogSource) {
     });
 
     document.getElementById('testConvBtn')?.addEventListener('click', testConversation);
+
+    document.getElementById('makeAttackBtn')?.addEventListener('click', () => hudMakeAttack());
+    document.getElementById('influenceBtn')?.addEventListener('click', () => hudInfluence());
+
+    // Relationship-delta toggle (2D screen)
+    document.getElementById('relDeltaToggleBtn')?.addEventListener('click', () => {
+        state.showRelDelta = !state.showRelDelta;
+        const btn = document.getElementById('relDeltaToggleBtn');
+        if (btn) btn.textContent = `\ud83d\udcac Rel. Changes: ${state.showRelDelta ? 'ON' : 'OFF'}`;
+    });
 
     window.addEventListener('resize', () => {
         const existing = document.getElementById('culdesac');
