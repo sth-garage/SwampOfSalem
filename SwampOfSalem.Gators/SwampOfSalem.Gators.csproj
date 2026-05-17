@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+	<TargetFramework>net10.0</TargetFramework>
+	<Nullable>enable</Nullable>
+	<ImplicitUsings>enable</ImplicitUsings>
+	<RootNamespace>SwampOfSalem.Gators</RootNamespace>
+	<AssemblyName>SwampOfSalem.Gators</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+	<ProjectReference Include="..\SwampOfSalem.Shared\SwampOfSalem.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

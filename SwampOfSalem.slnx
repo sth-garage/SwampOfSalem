@@ -1,5 +1,6 @@
-﻿<Solution>
+<Solution>
   <Project Path="SwampOfSalem.Web/SwampOfSalem.Web.csproj" />
+  <Project Path="SwampOfSalem.Gators/SwampOfSalem.Gators.csproj" />
   <Project Path="SwampOfSalem.Shared/SwampOfSalem.Shared.csproj" />
   <Project Path="SwampOfSalem.AppLogic/SwampOfSalem.AppLogic.csproj" />
   <Project Path="SwampOfSalem.SK/SwampOfSalem.SK.csproj" />

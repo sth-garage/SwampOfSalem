@@ -1,10 +1,39 @@
-﻿import {
+﻿/**
+ * @fileoverview rendering.js — All DOM read/write operations for the simulation UI.
+ *
+ * This module owns the visual layer. No other module should directly manipulate
+ * DOM elements — they call functions from here instead.
+ *
+ * Key responsibilities:
+ *
+ *   renderGator(gator)           Positions and updates one gator's SVG sprite on canvas.
+ *   renderAllGators()            Calls renderGator() for every living gator each frame.
+ *   updateStats()                Refreshes the activity count bar at the top.
+ *   updatePhaseLabel()           Updates the phase label and nightfall countdown timer.
+ *   updateHouseGuests()          Refreshes the in-house guest list overlay per house.
+ *   syncTalkLines()              Draws/removes SVG lines between talking pairs.
+ *   initTooltip()                Sets up the hover-detail tooltip for gator inspection.
+ *   showTooltip(gator, x, y)     Renders the full stat card tooltip for a gator.
+ *   moveTooltip(x, y)            Moves a visible tooltip to follow the cursor.
+ *   hideTooltip()                Hides the floating tooltip.
+ *   pinTooltip(gator)            Pins the tooltip so it stays visible after mouse-out.
+ *   refreshPinnedTooltip()       Re-renders a pinned tooltip with fresh data.
+ *   cleanPrivateChatBubbles()    Removes stale private-chat enclosures from the DOM.
+ *   showDeadBody(gatorName, x,y) Displays a "💀 died" marker at the death location.
+ *
+ * @module rendering
+ */
+import {
     GATOR_SIZE, PHASE, ACTIVITY_EMOJI, PERSONALITY_EMOJI,
     MOOD_MATRIX, MOOD_EMOJI, GATOR_COUNT, DAY_TICKS, TICK_MS, HOME_WARN_TICKS
 } from './gameConfig.js';
 import { relationEmoji, relationColor } from './helpers.js';
 import { living } from './gator.js';
 import { state } from './state.js';
+
+// Public hook kept as a no-op for backwards compatibility with simulation.js;
+// Babylon is no longer used to render the main world (POV mode only).
+export function syncBabylonMeshes() { /* no-op: 2D world */ }
 
 // ── Stats bar ─────────────────────────────────────────────────
 export function updateStats() {
@@ -29,44 +58,28 @@ export function updatePhaseLabel() {
     const timerEl = document.getElementById('nightfall-timer');
     if (timerEl) {
         if (state.gamePhase === PHASE.DAY && state.cycleTimer > 0) {
-            if (state.dayEndTimerActive && state.dayEndTimerExpiresAt > 0) {
-                // Show the 1-minute conversation-limit countdown
-                const msLeft = Math.max(0, state.dayEndTimerExpiresAt - Date.now());
-                if (state.noNewConversations) {
-                    timerEl.textContent = `🌙 Night coming — finishing conversations…`;
-                    timerEl.style.color = '#ff6040';
-                    timerEl.style.borderColor = 'rgba(200,60,40,.4)';
-                } else {
-                    const secsLeft = Math.ceil(msLeft / 1000);
-                    const mins = Math.floor(secsLeft / 60);
-                    const secs = secsLeft % 60;
-                    timerEl.textContent = `🌙 Night in ${mins}:${secs.toString().padStart(2, '0')} (no new conversations after)`;
-                    timerEl.style.color = secsLeft <= 10 ? '#ff6040' : '';
-                    timerEl.style.borderColor = secsLeft <= 10 ? 'rgba(200,60,40,.4)' : '';
-                }
-                timerEl.classList.add('visible');
+            const secsLeft = Math.ceil(state.cycleTimer * TICK_MS / 1000);
+            const mins = Math.floor(secsLeft / 60);
+            const secs = secsLeft % 60;
+            timerEl.textContent = `🌙 Nightfall in ${mins}:${secs.toString().padStart(2, '0')}`;
+            timerEl.classList.add('visible');
+            if (state.cycleTimer <= HOME_WARN_TICKS) {
+                timerEl.style.color = '#ff6040';
+                timerEl.style.borderColor = 'rgba(200,60,40,.4)';
             } else {
-                const secsLeft = Math.ceil(state.cycleTimer * TICK_MS / 1000);
-                const mins = Math.floor(secsLeft / 60);
-                const secs = secsLeft % 60;
-                timerEl.textContent = `\u{1F319} Nightfall in ${mins}:${secs.toString().padStart(2, '0')}`;
-                timerEl.classList.add('visible');
-                if (state.cycleTimer <= HOME_WARN_TICKS) {
-                    timerEl.style.color = '#ff6040';
-                    timerEl.style.borderColor = 'rgba(200,60,40,.4)';
-                } else {
-                    timerEl.style.color = '';
-                    timerEl.style.borderColor = '';
-                }
+                timerEl.style.color = '';
+                timerEl.style.borderColor = '';
             }
         } else {
             timerEl.classList.remove('visible');
         }
     }
-    let voteLabel = `\uD83D\uDDF3\uFE0F Voting...`;
+    let voteLabel = state.tieRevote ? `🔁 Tie! Re-voting...` : `🗳️ Voting...`;
     if (state.gamePhase === PHASE.VOTE && state.voteIndex < state.voteOrder.length) {
         const voter = state.voteOrder[state.voteIndex];
-        if (voter) voteLabel = `\uD83D\uDDF3\uFE0F ${voter.name} is voting... (${state.voteIndex + 1}/${state.voteOrder.length})`;
+        if (voter) voteLabel = state.tieRevote
+            ? `🔁 Tie Re-Vote — ${voter.name} is voting... (${state.voteIndex + 1}/${state.voteOrder.length})`
+            : `🗳️ ${voter.name} is voting... (${state.voteIndex + 1}/${state.voteOrder.length})`;
     }
     let executeLabel = `\u2694\uFE0F Execution...`;
     if (state.gamePhase === PHASE.EXECUTE && state.condemnedId !== null) {
@@ -192,7 +205,32 @@ export function renderGator(p) {
             state.bubbles.set(p.id, bubble);
         }
 
-        // Offset bubbles vertically so conversing pairs don't overlap
+        // Determine left/right positioning for conversation bubbles
+        let bubbleOffsetX = 0; // horizontal offset from gator center
+        let bubbleClass = 'chat-bubble';
+        let alignSide = 'center'; // 'left', 'right', or 'center'
+
+        if (p.talkingTo != null) {
+            const partner = state.gators.find(q => q.id === p.talkingTo);
+            if (partner) {
+                // Determine if this gator is on the left or right
+                if (p.x < partner.x) {
+                    // This gator is on the left - bubble goes to the left
+                    bubbleOffsetX = -90;
+                    alignSide = 'left';
+                    bubbleClass = `chat-bubble bubble-left bubble-gator-${p.id % 8}`;
+                } else {
+                    // This gator is on the right - bubble goes to the right
+                    bubbleOffsetX = 90;
+                    alignSide = 'right';
+                    bubbleClass = `chat-bubble bubble-right bubble-gator-${p.id % 8}`;
+                }
+            }
+        }
+
+        bubble.className = bubbleClass;
+
+        // Position bubble - offset vertically to prevent overlap, horizontally for left/right
         let bubbleOffsetY = -38;
         if (p.talkingTo != null) {
             const partner = state.gators.find(q => q.id === p.talkingTo);
@@ -208,8 +246,18 @@ export function renderGator(p) {
             }
         }
 
-        bubble.style.left = `${p.x + GATOR_SIZE / 2 - 20}px`;
-        bubble.style.top  = `${p.y + bubbleOffsetY}px`;
+        if (alignSide === 'left') {
+            bubble.style.left = `${p.x + GATOR_SIZE / 2 + bubbleOffsetX}px`;
+            bubble.style.transform = 'translateX(0)';
+        } else if (alignSide === 'right') {
+            bubble.style.left = `${p.x + GATOR_SIZE / 2 + bubbleOffsetX}px`;
+            bubble.style.transform = 'translateX(-100%)';
+        } else {
+            bubble.style.left = `${p.x + GATOR_SIZE / 2 - 20}px`;
+            bubble.style.transform = 'translateX(-50%)';
+        }
+        bubble.style.top = `${p.y + bubbleOffsetY}px`;
+
         if (p.isWaiting && !p.message) {
             // Show animated dots while waiting for AI response
             if (!bubble.querySelector('.bubble-waiting')) {
@@ -344,14 +392,13 @@ function _renderPanel(p) {
             </div>`;
         }).join('');
 
-    // Top suspect
-    const suspEntries = living()
-        .filter(q => q.id !== p.id)
-        .map(q => ({ q, s: p.suspicion[q.id] ?? 0 }))
-        .sort((a, b) => b.s - a.s);
-    const topSuspect = suspEntries.length > 0 && suspEntries[0].s > 15
-        ? `<div class="panel-suspect">\uD83D\uDD75\uFE0F Suspects <strong>${suspEntries[0].q.name}</strong> (${Math.round(suspEntries[0].s)}%)</div>`
-        : '';
+    // Intent: who they've decided to kill / vote for, and why
+    let intentBlock = '';
+    if (isMurderer && p.plannedKillTarget && !state.deadIds.has(p.plannedKillTarget.id)) {
+        intentBlock = `<div class="panel-intent panel-intent-kill">\uD83D\uDD2A Intends to kill <strong>${p.plannedKillTarget.name}</strong><div class="panel-intent-reason">${p.plannedKillReason ?? ''}</div></div>`;
+    } else if (!isMurderer && p.plannedVoteTarget && !state.deadIds.has(p.plannedVoteTarget.id)) {
+        intentBlock = `<div class="panel-intent panel-intent-vote">\uD83D\uDDF3\uFE0F Intends to vote for <strong>${p.plannedVoteTarget.name}</strong><div class="panel-intent-reason">${p.plannedVoteReason ?? ''}</div></div>`;
+    }
 
     // Vote history
     const myVotes = (state.voteHistory || []).filter(v => v.voterId === p.id);
@@ -434,7 +481,7 @@ function _renderPanel(p) {
             `<div class="panel-stat-row">💭 Thought ${statBar(p.thoughtStat)} <span>${p.thoughtStat}/10</span></div>` +
         `</div>` +
         `<div class="panel-divider"></div>` +
-        topSuspect + votedStr +
+        intentBlock + votedStr +
         `<div class="panel-divider"></div>` +
         `<div class="panel-section-title">\uD83E\uDD1D Relations</div>` +
         `<div class="panel-relations">${relRows}</div>` +

@@ -1,10 +1,50 @@
-﻿import {
+﻿/**
+ * @fileoverview simulation.js — Core simulation tick loop and conversation engine.
+ *
+ * This is the largest and most central module in the frontend. It exports two
+ * public functions consumed by main.js:
+ *
+ *   initSimulation()
+ *     Called once at page load. Spawns houses and gators, assigns the murderer,
+ *     initialises all relationships, registers the setInterval tick loop, and
+ *     calls the .NET API to initialise SK agents.
+ *
+ *   testConversation()
+ *     Debug helper: picks two random living gators and a random topic, then
+ *     immediately launches a full AI conversation between them.
+ *
+ * Internal tick loop (runs every TICK_MS ms via setInterval):
+ *   Each tick:
+ *     1. Decrements the day/night cycle timer.
+ *     2. Moves each gator toward their target position.
+ *     3. Evaluates whether any two gators are close enough to start a conversation.
+ *     4. Manages the active conversation lock (only 1 AI conv at a time).
+ *     5. Plays back buffered AI conversation turns if one is queued.
+ *     6. Triggers phase transitions (night, dawn, debate, vote, execute) when timers expire.
+ *     7. Calls renderAllGators() for the current frame.
+ *
+ * Conversation flow (public conversations):
+ *   Two gators approach each other → simulation triggers requestFullConversation() →
+ *   agentQueue buffers memories, calls POST /api/agent/conversation → AI returns
+ *   all turns → agentQueue plays them back one at a time → onComplete callback resets
+ *   both gators to 'moving'.
+ *
+ * Private conversations (hosting/visiting):
+ *   Same flow but isPrivate=true — speech is not shown to passers-by and
+ *   the conversation enclosure DOM element wraps the house.
+ *
+ * Overhearing:
+ *   When a gator speaks publicly, logChat() broadcasts the message to all gators
+ *   within TALK_DIST. Overheard speech can update nearby gators' suspicion scores.
+ *
+ * @module simulation
+ */
+import {
     GATOR_SIZE, PHASE, TICK_MS, TALK_DIST, TALK_STOP,
     HOME_WARN_TICKS,
     VOTE_DISPLAY_TICKS,
     CONVICTION_THRESHOLD, GATOR_COUNT,
-    PERSONALITY_EMOJI, MAX_DEBATE_SPEAKERS, DEBATE_SPEAK_COOLDOWN,
-    CONV_LIMIT_FOR_NIGHTFALL, NIGHTFALL_DELAY_MS
+    PERSONALITY_EMOJI, DEBATE_SPEAK_COOLDOWN
 } from './gameConfig.js';
 import {
     rnd, rndF, rndTicks, stageBounds, dist, weightedPick,
@@ -19,15 +59,17 @@ import { state, resetGameState } from './state.js';
 import {
     triggerNightfall, triggerDawn, triggerDebate, triggerVote,
     triggerExecute, showNextVoter, finaliseExecution,
-    pickDebateSuspect
+    pickDebateSuspect, advanceDebateSpeaker
 } from './phases.js';
 import {
     renderGator, renderAllGators, updateStats, updatePhaseLabel,
     updateHouseGuests, syncTalkLines,
     initTooltip, showTooltip, moveTooltip, hideTooltip,
-    pinTooltip, refreshPinnedTooltip, cleanPrivateChatBubbles
+    pinTooltip, refreshPinnedTooltip, cleanPrivateChatBubbles,
+    syncBabylonMeshes
 } from './rendering.js';
-import { requestDialog, requestFullConversation, requestVote, recordMemory, drainNextConvTurn } from './agentQueue.js';
+import { ISLAND_TREE_POSITIONS } from './gatorBabylon.js';
+import { requestDialog, requestFullConversation, requestVote, recordMemory, drainNextConvTurn, setTickFunction } from './agentQueue.js';
 
 // ── Test Conversation ─────────────────────────────────────────
 export function testConversation() {
@@ -75,7 +117,86 @@ export function testConversation() {
     });
 }
 
+/**
+ * Starts a conversation initiated by the POV-controlled gator with a chosen partner.
+ * Called from gatorBabylon.js when the player clicks "Start Conversation" in the
+ * POV context menu.  Mirrors the tick()-based conversation logic but bypasses all
+ * guards (distance, cooldown, etc.) since the player explicitly requested it.
+ *
+ * Returns false if a conversation is already active or either gator is busy.
+ */
+export function startPovConversation(povGator, partner) {
+    if (!povGator || !partner) return false;
+    if (state.activeConversation) return false;
+    if (povGator.talkingTo !== null || partner.talkingTo !== null) return false;
+    if (povGator.activity === 'resting' || partner.activity === 'resting') return false;
+
+    const dur = rndTicks('talking');
+    povGator.activity  = 'talking'; povGator.talkingTo  = partner.id; povGator.ticksLeft = dur;
+    partner.activity   = 'talking'; partner.talkingTo   = povGator.id; partner.ticksLeft = dur;
+    state.activeConversation = true;
+
+    const firstMeeting = !(povGator.met ??= new Set()).has(partner.id);
+    if (firstMeeting) {
+        povGator.met.add(partner.id);
+        (partner.met ??= new Set()).add(povGator.id);
+        const compat = topicCompatibility(povGator.topicOpinions ?? {}, partner.topicOpinions ?? {});
+        const seed = Math.round(compat * 0.2);
+        povGator.relations[partner.id] = Math.max(-100, Math.min(100, seed));
+        partner.relations[povGator.id] = Math.max(-100, Math.min(100, seed));
+        povGator.perceivedRelations[partner.id] = seed;
+        partner.perceivedRelations[povGator.id]  = seed;
+        const introCtx = `First meeting. ${povGator.name} has opinions: ${Object.entries(povGator.topicOpinions ?? {}).map(([t,v])=>`${t}:${v>0?'+':''}${v}`).join(', ')}.`;
+        const openingLine = `Hi, I'm ${povGator.name}!`;
+        povGator.message = openingLine;
+        requestFullConversation(povGator, partner, openingLine, 6, introCtx, false, _onConversationCompleted);
+        recordMemory(povGator.id, state.dayNumber, 'first_meeting', `Met ${partner.name} for the first time`, partner.id);
+        recordMemory(partner.id, state.dayNumber, 'first_meeting', `Met ${povGator.name} for the first time`, povGator.id);
+    } else {
+        const openingLine = `Hey ${partner.name}!`;
+        povGator.message = openingLine;
+        requestFullConversation(povGator, partner, openingLine, 6, null, false, _onConversationCompleted);
+        recordMemory(povGator.id, state.dayNumber, 'conversation_start', `Started talking with ${partner.name}`, partner.id);
+        recordMemory(partner.id, state.dayNumber, 'conversation_start', `${povGator.name} started talking to me`, povGator.id);
+    }
+    return true;
+}
+
 // ── Chat logging & overhearing ────────────────────────────────
+/**
+ * Logs a speech (or thought) event into the relevant gators' chat histories
+ * and broadcasts it to nearby observers who can overhear.
+ *
+ * CALLED BY:
+ *   - agentQueue._drainNextConvTurn() — for each AI conversation turn
+ *   - Various phase helpers that generate scripted one-liners
+ *
+ * WHAT IT DOES:
+ *   1. Builds a chat log entry { day, from, to, message, thought, ts, type }
+ *      and pushes it to the speaker's chatLog.
+ *   2. Pushes the same entry (without the thought) to the target's chatLog
+ *      so both sides of the conversation are recorded from each perspective.
+ *   3. If NOT private, iterates every LIVING gator. Any gator within TALK_DIST
+ *      of the speaker receives an 'overheard' entry in their chatLog AND a
+ *      recordMemory() call so the AI will remember they overheard this line.
+ *
+ * PRIVATE CONVERSATIONS (isPrivate = true):
+ *   Hosting/visiting conversations are private. No overhearing. The only gators
+ *   who receive the entry are the speaker and the direct target. This reflects
+ *   that conversations inside a home are not audible to passersby.
+ *
+ * NOTE — SUSPICION via overhearing:
+ *   When a gator overhears a line that mentions the murderer or accuses someone,
+ *   that could update their suspicion score. The suspicion update is currently
+ *   handled upstream (in _maybeShareOpinion and agentQueue context injection)
+ *   rather than inside logChat itself.
+ *
+ * @param {object}  speaker   - Person object for the gator speaking.
+ * @param {number|null} targetId - ID of the gator being spoken to, or null for broadcast.
+ * @param {string}  message   - The speech text to log.
+ * @param {string|null} thought - The speaker's inner thought (only stored on speaker's log).
+ * @param {boolean} isPrivate - If true, no overhearing (hosting conversations).
+ */
 export function logChat(speaker, targetId, message, thought, isPrivate = false) {
     if (!message) return; // nothing meaningful to log
     const now = Date.now();
@@ -109,18 +230,62 @@ export function logChat(speaker, targetId, message, thought, isPrivate = false) 
 }
 
 // ── Conversation completion counter ───────────────────────────
+/**
+ * Called every time a full AI conversation concludes (public or hosting).
+ *
+ * RESPONSIBILITIES:
+ *   Clears the global `state.activeConversation` flag so new conversations
+ *   can start on the next tick. Days are purely time-based (DAY_TICKS);
+ *   nightfall fires when the cycle timer expires.
+ *
+ * CALL SITES:
+ *   - simulation.js tick() — when two street-talking gators finish their conversation
+ *   - simulation.js hosting block — via onHostingComplete callback
+ *   - agentQueue._drainNextConvTurn() — via the onComplete callback
+ *   - simulation.js testConversation() — debug helper
+ */
 function _onConversationCompleted() {
     state.activeConversation = false;
-    state.completedConvCount++;
-    console.log(`[Day] Conversation #${state.completedConvCount} completed.`);
-    if (!state.dayEndTimerActive && state.completedConvCount >= CONV_LIMIT_FOR_NIGHTFALL) {
-        state.dayEndTimerActive    = true;
-        state.dayEndTimerExpiresAt = Date.now() + NIGHTFALL_DELAY_MS;
-        console.log(`[Day] ${CONV_LIMIT_FOR_NIGHTFALL} conversations done — nightfall in ${NIGHTFALL_DELAY_MS / 1000}s`);
-    }
+    console.log('[Day] Conversation completed.');
 }
 
 // ── Opinion sharing helper ────────────────────────────────────
+/**
+ * Called at the END of a street conversation (after driftRelations) to
+ * simulate one gator sharing their opinion of a THIRD gator with the listener.
+ *
+ * This is how rumours and reputation spread through the village — gators gossip
+ * about each other and gradually update their second-hand opinions.
+ *
+ * PROBABILITY:
+ *   30% chance per conversation (70% of the time nothing is shared).
+ *   This keeps gossip feeling sporadic and organic rather than constant.
+ *
+ * THREE PATHS depending on speaker's feelings toward the listener:
+ *
+ * PATH A — Speaker DISLIKES listener (relation < -30):
+ *   Sub-path A1 (50%): Guarded response. Speaker says little and is evasive.
+ *     Records a 'guarded' history entry. Sets a 2.5s speak cooldown.
+ *   Sub-path A2 (50%): Speaker actively LIES to frame an enemy.
+ *     Picks a disliked third gator as the "target" and a liked gator as the
+ *     "victim." Asks the AI to generate a framing line. Nudges the listener's
+ *     suspicion of the target upward, proportional to how much the listener
+ *     trusts the speaker.
+ *
+ * PATH B — Normal (honest) opinion sharing:
+ *   Picks the third gator the speaker has the STRONGEST opinion about
+ *   (positive or negative, by absolute value).
+ *   If the speaker is a liar AND has low trust with the listener, there is a
+ *   40% chance they FLIP the opinion (pretend to like someone they hate, or vice versa).
+ *   The listener's relation toward the target is nudged by:
+ *     influence = (trust / 100) * 18 + 4   (range: ~4..22)
+ *     nudge = ±influence depending on whether the opinion was positive or negative
+ *   Both speaker and listener get history entries. If nudge > 5, the listener
+ *   also gets an 'opinion_changed' history entry for the end-game report.
+ *
+ * @param {object} speaker  - Person object for the gator doing the gossip.
+ * @param {object} listener - Person object for the gator receiving the gossip.
+ */
 function _maybeShareOpinion(speaker, listener) {
     if (Math.random() > 0.30) return; // 30% chance per conversation
     const others = living().filter(q => q.id !== speaker.id && q.id !== listener.id);
@@ -200,6 +365,58 @@ function _maybeShareOpinion(speaker, listener) {
 }
 
 // ── Activity tick ─────────────────────────────────────────────
+/**
+ * The main simulation tick — called every TICK_MS milliseconds by setInterval.
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * TICK LOOP OVERVIEW (runs once per TICK_MS, e.g. every 250ms)
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * 1. EARLY RETURNS
+ *    - If game is OVER or paused, do nothing.
+ *
+ * 2. CYCLE TIMER
+ *    - Decrements state.cycleTimer each tick.
+ *    - When it hits 0, triggers the next phase transition:
+ *        DAY    → triggerNightfall()
+ *        NIGHT  → triggerDawn()
+ *        DAWN   → triggerDebate()
+ *        DEBATE → triggerVote()
+ *        VOTE   → triggerExecute()
+ *
+ * 3. HOME WARNING
+ *    - At HOME_WARN_TICKS ticks remaining in the day, all active conversations
+ *      are cut short and every gator starts walking home.
+ *
+ * 4. PHASE-SPECIFIC BRANCHES
+ *    - VOTE phase: advances the sequential vote cursor on a timer.
+ *    - EXECUTE phase: moves the condemned gator to centre, then finalises.
+ *    - NIGHT phase: returns early (no gator logic during night).
+ *
+ * 6. PER-GATOR LOOP
+ *    For each living gator:
+ *      a. Decrement ticksLeft.
+ *      b. Handle DEBATING (generate accusation/defence messages).
+ *      c. Skip gators still mid-activity (ticksLeft > 0).
+ *      d. End TALKING: if AI call or turn drain is still running, keep waiting.
+ *         Otherwise: drift relations, record memories, fire _maybeShareOpinion,
+ *         fire _onConversationCompleted.
+ *      e. End HOSTING: release guests, apply topic delta, fire onHostingComplete.
+ *      f. End VISITING: release gator, put back to 'moving'.
+ *      g. Choose next activity via weightedPick(socialWeights(gator)).
+ *         - 'talking': find a nearby eligible partner; start a conversation.
+ *         - 'hosting': find a free guest; send them to the host's home.
+ *         - 'moving':  pick a new random target position.
+ *
+ * 7. RENDER
+ *    - renderGator() is called on every living gator.
+ *    - Private chat enclosures are cleaned up.
+ *    - updateStats() refreshes the HUD.
+ *
+ * NOTE: Pixel movement (smooth animation) happens in gameLoop() via
+ * requestAnimationFrame — NOT here. The tick only updates logical activity
+ * state; gameLoop() reads that state to move sprites each animation frame.
+ */
 function tick() {
     if (state.gamePhase === PHASE.OVER) return;
     if (state.paused) return;
@@ -211,21 +428,6 @@ function tick() {
         else if (state.gamePhase === PHASE.DAWN)   { triggerDebate();    return; }
         else if (state.gamePhase === PHASE.DEBATE) { triggerVote();      return; }
         else if (state.gamePhase === PHASE.VOTE)   { triggerExecute();   return; }
-    }
-
-    // Conversation-limit nightfall: once the 1-min timer expires, lock new convs and watch for all to finish
-    if (state.gamePhase === PHASE.DAY && state.dayEndTimerActive) {
-        const now = Date.now();
-        if (!state.noNewConversations && now >= state.dayEndTimerExpiresAt) {
-            state.noNewConversations = true;
-        }
-        if (state.noNewConversations) {
-            const anyTalking = living().some(p => p.talkingTo !== null || p.activity === 'hosting' || p.activity === 'visiting');
-            if (!anyTalking) {
-                triggerNightfall();
-                return;
-            }
-        }
     }
 
     // At HOME_WARN_TICKS left in the day, end all conversations and walk everyone home
@@ -243,6 +445,21 @@ function tick() {
             }
         }
         state.talkLines.forEach(l => l.remove()); state.talkLines.clear();
+        state.noNewConversations = true;
+    }
+
+    // Debate floor:
+    // debateSpeakerWaiting is true while an async AI call is in-flight; we freeze
+    // the timer so the floor doesn't advance before the AI responds.
+    if (state.gamePhase === PHASE.DEBATE) {
+        if (!state.debateSpeakerWaiting) {
+            state.debateSpeakerTimer--;
+            if (state.debateSpeakerTimer <= 0) {
+                advanceDebateSpeaker();
+            }
+        }
+        updatePhaseLabel();
+        // Still run per-gator movement below (they walk to their positions)
     }
 
     // Sequential vote: advance to next voter each VOTE_DISPLAY_TICKS ticks
@@ -295,63 +512,10 @@ function tick() {
         ).map(p => p.id)
     );
 
-    // Count current speakers in debate so we can cap simultaneous speech
-    let debateSpeakerCount = 0;
-    if (state.gamePhase === PHASE.DEBATE) {
-        debateSpeakerCount = activePeople.filter(p => p.activity === 'debating' && !!p.message).length;
-    }
+    // (debate speaker count tracking removed — floor is now managed by advanceDebateSpeaker())
 
     for (const gator of activePeople) {
         gator.ticksLeft--;
-
-        // Thoughts are handled in gameLoop() on real-time schedules per gator.
-        // Speech cooldowns are also real-time; check Date.now() against nextSpeakAt.
-        const now = Date.now();
-        const canSpeak = now >= gator.nextSpeakAt;
-
-        // Conversation turn-taking is handled by the full-conversation drain timer.
-        // During an ongoing talk, just let the drain timer advance the turns.
-        if (gator.activity === 'debating' && gator.ticksLeft > 0) {
-            if (canSpeak && debateSpeakerCount < MAX_DEBATE_SPEAKERS) {
-                const suspect = pickDebateSuspect(gator);
-                if (suspect) {
-                    const lines = [
-                        `I suspect ${suspect.name}!`,
-                        `Watch out for ${suspect.name}…`,
-                        `${suspect.name} is acting suspicious.`,
-                        `Don't trust ${suspect.name}.`
-                    ];
-                    gator.message = lines[rnd(lines.length)];
-                } else {
-                    const lines = [`I didn't do it!`, `Leave me out of this.`, `It wasn't me!`];
-                    gator.message = lines[rnd(lines.length)];
-                }
-
-                // Persuasion: high-conviction persons influence liked neighbours
-                if (suspect && gator.conviction > CONVICTION_THRESHOLD) {
-                    const listeners = living().filter(q =>
-                        q.id !== gator.id &&
-                        (gator.relations[q.id] ?? 0) > 10
-                    );
-                    if (listeners.length > 0) {
-                        const listener = listeners[rnd(listeners.length)];
-                        const liking = Math.max(0, listener.relations[gator.id] ?? 0);
-                        const influence = (liking / 100) * 22 + 5;
-                        listener.suspicion[suspect.id] = Math.min(100,
-                            (listener.suspicion[suspect.id] ?? 0) + influence);
-                        listener.conviction = Math.min(100, Math.max(
-                            listener.conviction, listener.suspicion[suspect.id]));
-                        gator.history.push({ day: state.dayNumber, type: 'persuaded', target: listener.id, about: suspect.id, detail: `Tried to convince ${listener.name} that ${suspect.name} is guilty` });
-                    }
-                }
-
-                const debateMs = 3000 + Math.random() * 5000;
-                gator.nextSpeakAt = now + debateMs;
-                debateSpeakerCount++;
-            } else if (!canSpeak && gator.nextSpeakAt - now < 800) {
-                gator.message = null;
-            }
-        }
 
         // Invitation disabled — conversations limited to 2 alligators
 
@@ -361,11 +525,12 @@ function tick() {
         if (gator.talkingTo !== null) {
             const partner = state.gators.find(p => p.id === gator.talkingTo);
             if (partner && partner.talkingTo === gator.id) {
-                // Hold gators in place while AI call is in-flight OR turns are still playing back
+                // Hold gators in place while AI call is in-flight OR turns are still playing back OR in final hold
                 const aiPending = gator.isWaiting || partner.isWaiting;
-                const drainActive = (gator._convTurns && gator._convTurns.length > 0) ||
-                                    (partner._convTurns && partner._convTurns.length > 0);
-                if (aiPending || drainActive) {
+                const gatorDraining = gator._convTurns && gator._convTurnIndex < gator._convTurns.length;
+                const partnerDraining = partner._convTurns && partner._convTurnIndex < partner._convTurns.length;
+                const finalHold = gator._convHolding || partner._convHolding;
+                if (aiPending || gatorDraining || partnerDraining || finalHold) {
                     gator.ticksLeft = 1; // keep ticking until AI + playback finishes
                     continue;
                 }
@@ -396,10 +561,11 @@ function tick() {
 
         // End hosting — guests leave (but only once AI drain + 3s hold is done)
         if (gator.activity === 'hosting') {
-            // Hold in place while AI call is in-flight or drain is still active
+            // Hold in place while AI call is in-flight, drain is still active, or in post-conv hold
             const aiPending = gator.isWaiting || state.gators.some(g => g.guestOfIndex === gator.homeIndex && g.isWaiting);
             const drainActive = (gator._convTurns && gator._convTurns.length > 0);
-            if (aiPending || drainActive) {
+            const holdActive  = !!gator._convHolding;
+            if (aiPending || drainActive || holdActive) {
                 gator.ticksLeft = 1;
                 continue;
             }
@@ -456,14 +622,17 @@ function tick() {
         if (next === 'talking') {
             const TALK_COOLDOWN_MS = 60_000;
             const now = Date.now();
-            // Don't start new conversations if the nightfall lock or global conv lock is active
-            if (!state.noNewConversations && !state.activeConversation) {
+            // Don't start new conversations if one is already active or end-of-day lock is set.
+            // Also skip if this gator is currently the POV-controlled gator.
+            if (!state.activeConversation && !state.noNewConversations && gator.id !== state.povGatorId) {
             const nearby = [...free]
                 .filter(id => id !== gator.id)
+                .filter(id => id !== state.povGatorId)  // never drag the POV gator into a conversation
                 .map(id => state.gators.find(p => p.id === id))
                 .filter(p => p && dist(gator, p) <= TALK_DIST)
                 .filter(p => (gator.relations[p.id] ?? 0) > -60)
-                .filter(p => (now - ((gator.recentTalkWith ?? {})[p.id] ?? 0)) >= TALK_COOLDOWN_MS);
+                .filter(p => (now - ((gator.recentTalkWith ?? {})[p.id] ?? 0)) >= TALK_COOLDOWN_MS)
+                .filter(p => p.activity !== 'talking' && p.talkingTo == null); // Don't invite gators already committed to a conversation
 
             if (nearby.length > 0) {
                 const partner = nearby.reduce((best, cand) => {
@@ -510,7 +679,7 @@ function tick() {
                 free.delete(partner.id);
                 continue;
             }
-            } // end if (!state.noNewConversations)
+            } // end if (!state.activeConversation)
             const anyFree = [...free].filter(id => id !== gator.id).map(id => state.gators.find(p => p.id === id)).filter(Boolean);
             if (anyFree.length > 0) {
                 const target = anyFree
@@ -525,13 +694,14 @@ function tick() {
             next = 'moving';
         }
 
-        if (next === 'hosting' && !state.noNewConversations && !state.activeConversation) {
+        if (next === 'hosting' && !state.activeConversation && !state.noNewConversations) {
         const TALK_COOLDOWN_MS = 60_000;
         const now = Date.now();
         const guest = [...free]
             .filter(id => id !== gator.id)
             .filter(id => (now - ((gator.recentTalkWith ?? {})[id] ?? 0)) >= TALK_COOLDOWN_MS)
             .map(id => state.gators.find(p => p.id === id))
+            .filter(p => p && p.activity !== 'talking' && p.talkingTo == null) // Don't invite gators already committed
             .filter(Boolean)[0];
 
         if (guest) {
@@ -599,10 +769,16 @@ function tick() {
         gator.message   = null;
         if (next === 'moving') {
             const { W, H } = stageBounds();
-            gator.targetX = rndF(W);
-            gator.targetY = rndF(H);
+            const WALL_MARGIN = 20;
+            let tx, ty, tries = 0;
+            do {
+                tx = WALL_MARGIN + rndF(W - WALL_MARGIN * 2);
+                ty = WALL_MARGIN + rndF(H - WALL_MARGIN * 2);
+                tries++;
+            } while (_isInsideObstacle(tx + GATOR_SIZE/2, ty + GATOR_SIZE/2) && tries < 15);
+            gator.targetX = tx;
+            gator.targetY = ty;
             gator.indoors = false;
-
             }
 
         if (next === 'resting') free.delete(gator.id);
@@ -610,21 +786,100 @@ function tick() {
     }
 
     activePeople.forEach(renderGator);
-    // Remove enclosures for any hosting pair that has ended
-    for (const [homeIdx, enc] of state.privateChatBubbles) {
-        const inUse = activePeople.some(p =>
-            p.indoors &&
-            (p.activity === 'hosting' || p.activity === 'visiting') &&
-            (p.homeIndex === homeIdx || p.guestOfIndex === homeIdx)
-        );
-        if (!inUse) { enc.remove(); state.privateChatBubbles.delete(homeIdx); }
-    }
+    cleanPrivateChatBubbles();
     updateStats();
 }
 
 // ── Animation loop ────────────────────────────────────────────
+/**
+ * The requestAnimationFrame (rAF) loop — runs at ~60fps independent of tick().
+ *
+ * SEPARATION OF CONCERNS:
+ *   tick()      = LOGICAL state (activity, relations, conversation starts)  — every 250ms
+ *   gameLoop()  = VISUAL state  (pixel positions, DOM style updates)        — every ~16ms
+ *
+ * This separation is what makes the simulation feel smooth even though the
+ * logic only updates 4 times per second. Gators glide between positions
+ * rather than jumping in discrete steps.
+ *
+ * HOW MOVEMENT WORKS:
+ *   Each frame, gameLoop() reads `p.x, p.y, p.targetX, p.targetY, p.speed`
+ *   and moves the gator a tiny step toward their target. When they arrive,
+ *   a new random target is picked.
+ *
+ * ACTIVITY-SPECIFIC MOVEMENT:
+ *   - 'resting':  Snap to house position, mark indoors.
+ *   - 'hosting':  Walk to door; once inside, drift gently within the enclosure bubble.
+ *   - 'visiting': Walk to host's door; once inside, drift within host bubble.
+ *   - 'debating': Walk toward debate target position (in front of house).
+ *   - 'talking':  Close in toward partner during conversation.
+ *                 (set by agentQueue while AI is in-flight or turns are playing back).
+ *   - default:    Normal wandering toward targetX/targetY; picks new random target on arrival.
+ *
+ * EXECUTE PHASE SPECIAL CASE:
+ *   Only the condemned gator moves. All others are frozen in place while
+ *   they watch the condemned walk to the centre for execution.
+ *
+ * DOM UPDATES:
+ *   After calculating each gator's new position:
+ *     el.style.left / el.style.top  — moves the gator DOM element
+ *     bubbleEl.style.left / .top    — keeps the speech bubble tracking the gator
+ *     el.classList.toggle('indoors'/'indoors-private') — controls CSS visibility
+ */
+let _rafFrameCount = 0;
+
+// ── Obstacle avoidance ─────────────────────────────────────────────────────
+// Obstacles in state.obstacles are stored directly in sim-px: { x, y, r, type }
+// This avoids any coordinate-system mismatch between Babylon world units and
+// the 2-D simulation pixel space.
+
+/**
+ * Nudge gator p out of any circular obstacle and clamp to the stage wall.
+ * All values are in sim-px. Called every rAF frame for moving gators.
+ */
+// Minimum pixel gap between a gator's sprite edge and the stage wall (3 feet × 20 px/ft).
+const WALL_CLEAR = 60;
+
+function _pushOutOfObstacles(p) {
+    const GATOR_R = GATOR_SIZE / 2;
+    // Wall: keep sprite edge at least WALL_CLEAR (3 ft) from each wall.
+    // p.x is the top-left corner, so right-edge = p.x + GATOR_SIZE.
+    const { W, H } = stageBounds();
+    p.x = Math.max(WALL_CLEAR, Math.min(W - GATOR_SIZE - WALL_CLEAR, p.x));
+    p.y = Math.max(WALL_CLEAR, Math.min(H - GATOR_SIZE - WALL_CLEAR, p.y));
+
+    const pcx = p.x + GATOR_R;
+    const pcy = p.y + GATOR_R;
+
+    for (const obs of state.obstacles) {
+        const ddx = pcx - obs.x;
+        const ddy = pcy - obs.y;
+        const dd  = Math.sqrt(ddx * ddx + ddy * ddy);
+        const minD = obs.r + GATOR_R;
+        if (dd < minD && dd > 0.001) {
+            const push = (minD - dd) / dd;
+            p.x += ddx * push;
+            p.y += ddy * push;
+        }
+    }
+}
+
+/**
+ * Returns true if a gator centred at (cx, cy) would overlap any obstacle.
+ */
+function _isInsideObstacle(cx, cy) {
+    const GATOR_R = GATOR_SIZE / 2;
+    for (const obs of state.obstacles) {
+        const ddx = cx - obs.x, ddy = cy - obs.y;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < obs.r + GATOR_R) return true;
+    }
+    return false;
+}
+
 function gameLoop() {
     if (!state.paused) {
+        _rafFrameCount++;
+        if (_rafFrameCount % 60 === 0) refreshPinnedTooltip();
         const { W, H } = stageBounds();
         const cx = GATOR_SIZE / 2;
 
@@ -675,18 +930,18 @@ function gameLoop() {
                         p.indoors = true;
                     }
                 } else {
-                    // Gentle drift within the enclosure bubble
+                    // Face-to-face: host stands on one side of house centre, guest on the other
                     const h = state.houses[p.homeIndex];
-                    const r = 38; // drift radius within enclosure
-                    const dx = p.targetX - p.x, dy = p.targetY - p.y;
-                    const d  = Math.sqrt(dx*dx + dy*dy);
-                    if (d <= p.speed * 0.4) {
-                        p.targetX = h.x + (Math.random() * 2 - 1) * r;
-                        p.targetY = h.y + (Math.random() * 2 - 1) * r;
-                    } else {
-                        p.x += (dx/d) * p.speed * 0.4;
-                        p.y += (dy/d) * p.speed * 0.4;
+                    const faceGap = GATOR_SIZE * 0.9;
+                    const hostTargetX = h.doorX - faceGap;
+                    const hostTargetY = h.doorY - GATOR_SIZE;
+                    const ddx = hostTargetX - p.x, ddy = hostTargetY - p.y;
+                    const dd  = Math.sqrt(ddx*ddx + ddy*ddy);
+                    if (dd > 2) {
+                        p.x = Math.max(0, Math.min(W, p.x + (ddx/dd)*Math.min(p.speed*0.6, dd)));
+                        p.y = Math.max(0, Math.min(H, p.y + (ddy/dd)*Math.min(p.speed*0.6, dd)));
                     }
+                    p.targetX = p.x; p.targetY = p.y;
                 }
             } else if (p.activity === 'visiting') {
                 if (!p.indoors) {
@@ -703,18 +958,18 @@ function gameLoop() {
                         p.indoors = true;
                     }
                 } else {
-                    // Gentle drift within the enclosure bubble (offset from host)
+                    // Face-to-face: guest stands opposite the host
                     const h = state.houses[p.guestOfIndex];
-                    const r = 38;
-                    const dx = p.targetX - p.x, dy = p.targetY - p.y;
-                    const d  = Math.sqrt(dx*dx + dy*dy);
-                    if (d <= p.speed * 0.4) {
-                        p.targetX = h.x + (Math.random() * 2 - 1) * r;
-                        p.targetY = h.y + GATOR_SIZE * 0.5 + (Math.random() * 2 - 1) * (r * 0.5);
-                    } else {
-                        p.x += (dx/d) * p.speed * 0.4;
-                        p.y += (dy/d) * p.speed * 0.4;
+                    const faceGap = GATOR_SIZE * 0.9;
+                    const guestTargetX = h.doorX + faceGap;
+                    const guestTargetY = h.doorY - GATOR_SIZE;
+                    const ddx = guestTargetX - p.x, ddy = guestTargetY - p.y;
+                    const dd  = Math.sqrt(ddx*ddx + ddy*ddy);
+                    if (dd > 2) {
+                        p.x = Math.max(0, Math.min(W, p.x + (ddx/dd)*Math.min(p.speed*0.6, dd)));
+                        p.y = Math.max(0, Math.min(H, p.y + (ddy/dd)*Math.min(p.speed*0.6, dd)));
                     }
+                    p.targetX = p.x; p.targetY = p.y;
                 }
             } else if (p.activity === 'debating') {
                 const dx = p.targetX - p.x, dy = p.targetY - p.y;
@@ -725,31 +980,64 @@ function gameLoop() {
                 }
             } else if (p.activity === 'talking') {
                 const partner = state.gators.find(q => q.id === p.talkingTo);
-                if (partner) {
-                    const dx = (partner.x+cx)-(p.x+cx), dy = (partner.y+cx)-(p.y+cx);
-                    const d  = Math.sqrt(dx*dx+dy*dy);
-                    // Keep closing until gators are face-to-face; stop well within TALK_STOP
-                    const stopAt = GATOR_SIZE * 0.6;
-                    if (d > stopAt) {
-                        const s = p.speed * 0.5;
-                        p.x = Math.max(0, Math.min(W, p.x+(dx/d)*s));
-                        p.y = Math.max(0, Math.min(H, p.y+(dy/d)*s));
+                if (partner && p.id < partner.id) {
+                    // Only the lower-id gator computes the facing positions (once per frame)
+                    // to avoid both gators fighting over the midpoint calculation.
+                    const mx = (p.x + partner.x) / 2;
+                    const my = (p.y + partner.y) / 2;
+                    // 5 feet (100px) gap between sprite edges → each stands 110px from midpoint.
+                    const faceGap = (GATOR_SIZE + 100) / 2;
+                    // Determine facing axis: if mostly horizontal, stand side-by-side
+                    const rawDx = partner.x - p.x;
+                    const rawDy = partner.y - p.y;
+                    const rawD  = Math.sqrt(rawDx*rawDx + rawDy*rawDy) || 1;
+                    // Snap each gator toward their face-to-face slot
+                    const pDx = p.x - mx, pDy = p.y - my;
+                    const pD  = Math.sqrt(pDx*pDx + pDy*pDy) || 1;
+                    const pTargetX = mx + (pDx/pD) * faceGap;
+                    const pTargetY = my + (pDy/pD) * faceGap;
+                    const bDx = partner.x - mx, bDy = partner.y - my;
+                    const bD  = Math.sqrt(bDx*bDx + bDy*bDy) || 1;
+                    const bTargetX = mx + (bDx/bD) * faceGap;
+                    const bTargetY = my + (bDy/bD) * faceGap;
+                    // Move toward face-to-face slot at reduced speed, then stop
+                    const SNAP_SPEED = p.speed * 0.8;
+                    const pdx = pTargetX - p.x, pdy2 = pTargetY - p.y;
+                    const pd  = Math.sqrt(pdx*pdx + pdy2*pdy2);
+                    if (pd > 2) {
+                        p.x = Math.max(0, Math.min(W, p.x + (pdx/pd)*Math.min(SNAP_SPEED, pd)));
+                        p.y = Math.max(0, Math.min(H, p.y + (pdy2/pd)*Math.min(SNAP_SPEED, pd)));
                     }
-                    // Don't let a talking gator drift away toward a stale targetX/Y
-                    p.targetX = p.x;
-                    p.targetY = p.y;
+                    const bdx = bTargetX - partner.x, bdy2 = bTargetY - partner.y;
+                    const bd  = Math.sqrt(bdx*bdx + bdy2*bdy2);
+                    if (bd > 2) {
+                        partner.x = Math.max(0, Math.min(W, partner.x + (bdx/bd)*Math.min(SNAP_SPEED, bd)));
+                        partner.y = Math.max(0, Math.min(H, partner.y + (bdy2/bd)*Math.min(SNAP_SPEED, bd)));
+                    }
+                    // Lock targets so nothing else moves them
+                    p.targetX = p.x; p.targetY = p.y;
+                    partner.targetX = partner.x; partner.targetY = partner.y;
                 }
             } else {
+                // Default movement behavior
                 const dx = p.targetX - p.x, dy = p.targetY - p.y;
                 const d  = Math.sqrt(dx*dx+dy*dy);
                 if (d <= p.speed) {
                     p.x = p.targetX; p.y = p.targetY;
+                    // Pick a target that respects the wall clearance and avoids obstacles.
                     const { W: bW, H: bH } = stageBounds();
-                    p.targetX = rndF(bW); p.targetY = rndF(bH);
+                    let tx, ty, tries = 0;
+                    do {
+                        tx = WALL_CLEAR + Math.random() * (bW - GATOR_SIZE - WALL_CLEAR * 2);
+                        ty = WALL_CLEAR + Math.random() * (bH - GATOR_SIZE - WALL_CLEAR * 2);
+                        tries++;
+                    } while (_isInsideObstacle(tx + GATOR_SIZE/2, ty + GATOR_SIZE/2) && tries < 15);
+                    p.targetX = tx; p.targetY = ty;
                 } else {
                     p.x = Math.max(0, Math.min(W, p.x+(dx/d)*p.speed));
                     p.y = Math.max(0, Math.min(H, p.y+(dy/d)*p.speed));
                 }
+                _pushOutOfObstacles(p);
             }
 
             const el = document.getElementById(`gator-${p.id}`);
@@ -761,20 +1049,19 @@ function gameLoop() {
                 el.classList.toggle('indoors-private', isPrivate);
             }
 
-            const bubbleEl = state.bubbles.get(p.id);
-            if (bubbleEl) {
-                bubbleEl.style.left = `${p.x + GATOR_SIZE / 2 - 20}px`;
-                bubbleEl.style.top  = `${p.y - 38}px`;
             }
-        }
 
-        syncTalkLines();
+            syncTalkLines();
     }
 
     state.rafId = requestAnimationFrame(gameLoop);
 }
 
 // ── Spawn / lifecycle ─────────────────────────────────────────
+/**
+ * Starts both the tick interval and the rAF loop, and sets the Pause button text.
+ * Called by initSimulation() at startup and by spawnGators() after a respawn.
+ */
 function startAll() {
     state.paused = false;
     document.getElementById('pauseBtn').textContent = '\u23F8 Pause';
@@ -782,14 +1069,47 @@ function startAll() {
     stopRaf(); startRaf();
 }
 
+/**
+ * Stops the tick interval and the rAF loop. Called at game-over and
+ * at the start of spawnGators() to clear state before a fresh run.
+ */
 function stopAll() {
     if (state.tickInterval) { clearInterval(state.tickInterval); state.tickInterval = null; }
     stopRaf();
 }
 
+/** Starts the requestAnimationFrame loop. Saves the handle in state.rafId for cancellation. */
 function startRaf() { state.rafId = requestAnimationFrame(gameLoop); }
+/** Cancels any in-flight rAF handle and nulls state.rafId. */
 function stopRaf()  { if (state.rafId !== null) { cancelAnimationFrame(state.rafId); state.rafId = null; } }
 
+/**
+ * Destroys and recreates the entire simulation from scratch.
+ *
+ * WHAT spawnGators() DOES (in order):
+ *   1. Stops tick loop + rAF loop.
+ *   2. Clears DOM: removes gator elements, bubbles, thought bubbles, house labels,
+ *      talk lines, and old SVG background.
+ *   3. Calls culdesacLayout() to compute fresh house positions.
+ *   4. Calls buildCuldesacSVG() and inserts the new background SVG.
+ *   5. Creates house-label and guest-badge span elements for each house.
+ *   6. Calls createGator(i, house) for each slot → pushes to state.gators[].
+ *   7. Creates the DOM div for each gator (with SVG figure, name label, personality badge).
+ *   8. Calls resetGameState() to clear day counter, dead set, conversation counters, etc.
+ *   9. Calls initRelations() to seed all relations/suspicion to 0.
+ *   10. Picks the MURDERER:
+ *       - Prefers extrovert or grumpy (thematically fitting).
+ *       - Sets murderer.liar = true.
+ *       - Adjusts murderer's perceivedRelations to appear friendly toward everyone
+ *         (the murderer masks their true negative feelings).
+ *   11. POSTs all gator data to /api/agent/initialize to create SK agents on the server.
+ *   12. Calls startAll() to begin the tick loop and rAF loop.
+ *
+ * CALLED BY:
+ *   - initSimulation() via requestAnimationFrame (first run).
+ *   - The Respawn button click handler.
+ *   - The "Restart" button on the game-over overlay.
+ */
 function spawnGators() {
     stopAll();
     state.gators = []; state.nextId = 0;
@@ -867,6 +1187,36 @@ function spawnGators() {
     // Reset game state
     resetGameState();
 
+    // ── Pre-populate obstacles in sim-px so 2-D collision works immediately ──
+    // These positions mirror the rock & tree positions used by gatorBabylon.js.
+    // BABYLON_SCALE = 0.1; sim-px = world-unit / 0.1 = world-unit * 10
+    const _B2S = 10; // Babylon world-unit → sim-px
+    state.obstacles = [];
+
+    // Rocks (world-unit coords from buildRocks, using fixed median size ≈ 1.1)
+    const _rockDefs = [
+        [8,12],[15,70],[110,8],[108,70],[3,40],
+        [118,42],[35,5],[82,75],[55,38],[72,18],
+        [25,62],[95,30],[42,72],[68,8],
+    ];
+    _rockDefs.forEach(([wx, wz]) => {
+        state.obstacles.push({ x: wx * _B2S, y: wz * _B2S, r: 20, type: 'rock' });
+    });
+
+    // Island-perimeter trees – use the same fixed list as gatorBabylon.js
+    ISLAND_TREE_POSITIONS.forEach(([wx, wz]) => {
+        state.obstacles.push({ x: wx * _B2S, y: wz * _B2S, r: 18, type: 'tree' });
+    });
+
+    // Houses (from state.houses which was just populated by culdesacLayout)
+    state.houses.forEach(h => {
+        // house half-diagonal ≈ 85px (HOUSE_W=12, HOUSE_D=12 world units → 120×120 sim-px)
+        state.obstacles.push({ x: h.x, y: h.y, r: 90, type: 'house' });
+    });
+
+    // Sync Babylon.js 3D meshes with the new gator + house roster
+    try { syncBabylonMeshes(); } catch (e) { console.warn('[babylon] syncBabylonMeshes failed', e); }
+
     // Clear dead body markers from previous game
     document.querySelectorAll('.dead-marker').forEach(e => e.remove());
 
@@ -921,20 +1271,37 @@ function spawnGators() {
 }
 
 // ── Module entry point ────────────────────────────────────────
-export function initSimulation(agentInterop) {
+/**
+ * Module initialisation — called once from main.js after the page loads.
+ *
+ * WHAT initSimulation() DOES:
+ *   1. Calls initTooltip() to set up the mouse-follow tooltip panel.
+ *   2. Calls setTickFunction(tick) to give agentQueue a reference to the tick
+ *      function without creating a circular import
+ *      (agentQueue imports simulation.js, simulation.js imports agentQueue.js;
+ *       passing the function reference at runtime breaks the cycle).
+ *   3. Wires up DOM button click handlers:
+ *        #respawnBtn     → spawnGators()
+ *        #goRestartBtn   → spawnGators()  (game-over overlay "Play Again" button)
+ *        #pauseBtn       → toggle state.paused / restart interval / update label
+ *        #testConvBtn    → testConversation() (debug shortcut)
+ *   4. Wires up a window resize handler that regenerates the cul-de-sac layout
+ *      and clamps gator positions to the new stage bounds.
+ *   5. Defers the first spawnGators() call to the NEXT two animation frames
+ *      (requestAnimationFrame → requestAnimationFrame) so the DOM has fully
+ *      rendered and el.clientWidth/clientHeight return accurate values before
+ *      the layout math runs.
+ *
+ * @param {object} agentInterop - Reserved for future Blazor/.NET interop (currently unused).
+ */
+export function initSimulation(agentInterop, dialogSource) {
     initTooltip();
+
+    // Provide tick function reference to agentQueue to avoid circular import
+    setTickFunction(tick);
 
     document.getElementById('respawnBtn').addEventListener('click', spawnGators);
     document.getElementById('goRestartBtn').addEventListener('click', spawnGators);
-
-    const skipAiBtn = document.getElementById('skipAiTurnsBtn');
-    if (skipAiBtn) {
-        skipAiBtn.addEventListener('click', () => {
-            state.ignoreSubsequentAiTurns = !state.ignoreSubsequentAiTurns;
-            skipAiBtn.textContent = `⏭ Skip AI turns: ${state.ignoreSubsequentAiTurns ? 'ON' : 'OFF'}`;
-            skipAiBtn.style.color = state.ignoreSubsequentAiTurns ? '#a8f090' : '';
-        });
-    }
 
     document.getElementById('pauseBtn').addEventListener('click', () => {
         if (state.paused) {
@@ -948,7 +1315,7 @@ export function initSimulation(agentInterop) {
         }
     });
 
-    document.getElementById('testConvBtn').addEventListener('click', testConversation);
+    document.getElementById('testConvBtn')?.addEventListener('click', testConversation);
 
     window.addEventListener('resize', () => {
         const existing = document.getElementById('culdesac');

@@ -1346,5 +1346,125 @@ content: '\2600\FE0F'; /* â˜€ï¸ U+2600 + variation selector */</pre>
         </div>
       </div>
 
+
+      <hr>
+
+      <!-- Session 2 — Turn 10 -->
+      <h2>Session 2 — Turn 10 · Code review &amp; cleanup pass</h2>
+      <div class="turn">
+        <div class="turn-user">
+          <div class="role role-user">User</div>
+          <p>continue</p>
+        </div>
+        <div class="turn-assistant">
+          <div class="role role-copilot">GitHub Copilot</div>
+          <h3>Code review findings</h3>
+          <p>Reviewed all JS modules after Session 2, Turn 9. Two issues found and fixed:</p>
+
+          <h3 class="bug">Bug 1 — <code>state.noNewConversations</code> never declared or set</h3>
+          <p>
+            <code>simulation.js</code> had <code>if (!state.noNewConversations)</code> guards around
+            both the <em>talking</em> and <em>hosting</em> activity branches. This flag was introduced
+            in Session 2, Turn 1 (the old 5-conversations-then-nightfall system) but was never migrated
+            when nightfall became purely timer-based. The property was never declared on <code>state</code>,
+            so it was always <code>undefined</code> (falsy) — the guard never fired. The variable was
+            also never set anywhere in the codebase.
+          </p>
+          <h3 class="fix">Fix 1</h3>
+          <ul>
+            <li>Added <code>noNewConversations: false</code> to <code>state.js</code> (declared + reset in <code>resetGameState()</code>).</li>
+            <li>Replaced the <code>!state.noNewConversations</code> guards in <code>simulation.js</code> with the
+              correct existing lock: <code>!state.activeConversation</code>, which is the actual 1-at-a-time mutex
+              used by the rest of the codebase.</li>
+          </ul>
+
+          <h3 class="bug">Bug 2 — <code>state.cliques</code> never declared</h3>
+          <p>
+            <code>agentQueue.js</code> references <code>state.cliques</code> in <code>_buildDebateLine()</code>
+            to generate clique-aware accusations/defences. The property was never declared on the <code>state</code>
+            object. The code was guarded with <code>?? []</code> so it didn't crash, but it was never initialised.
+          </p>
+          <h3 class="fix">Fix 2</h3>
+          <ul>
+            <li>Added <code>cliques: []</code> to <code>state.js</code> (declared + reset in <code>resetGameState()</code>).</li>
+          </ul>
+
+          <h3>Files changed</h3>
+          <ul>
+            <li><span class="tag">JS</span> <code>SwampOfSalem.Web/wwwroot/js/state.js</code> — added <code>noNewConversations</code> and <code>cliques</code></li>
+            <li><span class="tag">JS</span> <code>SwampOfSalem.Web/wwwroot/js/simulation.js</code> — replaced stale <code>noNewConversations</code> guards with <code>activeConversation</code></li>
+          </ul>
+          <p>Build verified successful.</p>
+        </div>
+      </div>
+
+      <hr>
+
+      <!-- Session 2 — Turn 11 -->
+      <h2>Session 2 — Turn 11 · UI wiring bug fixes &amp; constant sync</h2>
+      <div class="turn">
+        <div class="turn-user">
+          <div class="role role-user">User</div>
+          <p>continue</p>
+        </div>
+        <div class="turn-assistant">
+          <div class="role role-copilot">GitHub Copilot</div>
+          <h3>Code review findings</h3>
+          <p>Full codebase review after Session 2, Turn 10 revealed UI wiring issues and a stale constant. All fixed:</p>
+
+          <h3 class="bug">Bug 1 — <code>simulation.js</code> crashes on startup with TypeError</h3>
+          <p>
+            <code>initSimulation()</code> called <code>document.getElementById('testConvBtn').addEventListener(…)</code>
+            but <code>#testConvBtn</code> did not exist in the HTML. This threw
+            <code>TypeError: Cannot read properties of null</code> on every page load.
+          </p>
+          <h3 class="fix">Fix 1</h3>
+          <ul>
+            <li>Changed to optional chaining: <code>document.getElementById('testConvBtn')?.addEventListener(…)</code> in <code>simulation.js</code>.</li>
+            <li>Added <code>&lt;button id="testConvBtn"&gt;</code> to the HTML header controls so the button is actually present and functional.</li>
+          </ul>
+
+          <h3 class="bug">Bug 2 — <code>#dialogModeBtn</code> was a dead button</h3>
+          <p>
+            The header contained <code>&lt;button id="dialogModeBtn"&gt;🤖 AI&lt;/button&gt;</code>
+            with no click handler anywhere. It had no effect.
+          </p>
+          <h3 class="fix">Fix 2</h3>
+          <ul>
+            <li>Replaced <code>#dialogModeBtn</code> in the header with the functional <code>#testConvBtn</code>.</li>
+          </ul>
+
+          <h3 class="bug">Bug 3 — Splash debug buttons wired but absent from HTML</h3>
+          <p>
+            <code>index.html</code> had JS wiring for <code>#testAiBtn</code>, <code>#testConvSplashBtn</code>,
+            and <code>#getGatorBtn</code> but those buttons were not in the splash card markup.
+            Safe due to <code>?.addEventListener</code>, but the features were inaccessible.
+          </p>
+          <h3 class="fix">Fix 3</h3>
+          <ul>
+            <li>Added all three buttons to the splash card's button row so the AI test, test conversation, and Get Gator features are reachable from the splash screen.</li>
+          </ul>
+
+          <h3 class="bug">Inconsistency — <code>MaxConcurrentConversations = 2</code> in C#</h3>
+          <p>
+            <code>GameConstants.MaxConcurrentConversations</code> was set to 2, but the intended design
+            (Session 2, Turn 9) is strictly 1 — enforced by <code>state.activeConversation</code> in JS.
+            The C# constant was stale and misleading.
+          </p>
+          <h3 class="fix">Fix 4</h3>
+          <ul>
+            <li>Changed <code>MaxConcurrentConversations</code> to <code>1</code> and updated its doc comment to reference the JS lock.</li>
+          </ul>
+
+          <h3>Files changed</h3>
+          <ul>
+            <li><span class="tag">JS</span> <code>SwampOfSalem.Web/wwwroot/js/simulation.js</code> — optional chaining on testConvBtn</li>
+            <li><span class="tag">HTML</span> <code>SwampOfSalem.Web/wwwroot/index.html</code> — added testConvBtn to header; added testAiBtn, testConvSplashBtn, getGatorBtn to splash</li>
+            <li><span class="tag">C#</span> <code>SwampOfSalem.AppLogic/Constants/GameConstants.cs</code> — MaxConcurrentConversations → 1</li>
+          </ul>
+          <p>Build verified successful.</p>
+        </div>
+      </div>
+
       </body>
       </html>
