@@ -1244,6 +1244,18 @@ button.secondary:hover { background: rgba(30, 65, 28, 0.85); }
     padding-top: .4rem;
 }
 
+/* Influence picker — teal/purple accent overrides the default amber */
+.pov-influence-picker {
+    border-color: rgba(140, 80, 220, .55);
+}
+.pov-influence-picker .pov-picker-title {
+    color: #c8a8f8;
+    border-bottom-color: rgba(140,80,220,.25);
+}
+.pov-influence-picker .pov-picker-btn:hover {
+    background: rgba(120, 60, 220, .18);
+}
+
 /* ── POV in-conversation response choices ── */
 .pov-choices {
     position: absolute;
@@ -1296,4 +1308,105 @@ button.secondary:hover { background: rgba(30, 65, 28, 0.85); }
 .pov-choice-btn:hover {
     background: rgba(60,160,40,.3);
     border-color: rgba(100,220,70,.5);
+}
+
+/* ── Relationship-toggle button ── */
+button.rel-delta-toggle {
+    background: rgba(18, 40, 18, 0.75);
+    color: #90c878;
+    border-color: rgba(80,160,60,.35);
+}
+button.rel-delta-toggle:hover {
+    background: rgba(30, 65, 28, 0.9);
+    border-color: rgba(100,200,70,.55);
+}
+
+/* ── POV HUD pause / rel-delta buttons ── */
+#babylon-pov-hud .pov-hud-btn,
+#pov-hud-pause-btn,
+#pov-hud-rel-delta-btn {
+    background: rgba(8, 25, 8, 0.82);
+    color: #a0d888;
+    border: 1px solid rgba(80,180,60,.4);
+    border-radius: 7px;
+    padding: .3rem .65rem;
+    font-size: .8rem;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+}
+#pov-hud-pause-btn:hover,
+#pov-hud-rel-delta-btn:hover {
+    background: rgba(30, 70, 20, 0.95);
+    border-color: rgba(110,220,70,.65);
+}
+
+/* ── 2D relationship-delta floating labels ── */
+#rel-delta-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 35;
+}
+.rel-delta-label {
+    position: absolute;
+    max-width: 200px;
+    padding: .25rem .55rem;
+    border-radius: 8px;
+    font-size: .78rem;
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: normal;
+    text-align: center;
+    transform: translateX(-50%);
+    pointer-events: none;
+    animation: relDeltaRise .4s ease-out forwards;
+    transition: opacity .6s;
+}
+.rel-delta-pos {
+    background: rgba(20, 80, 20, 0.82);
+    color: #b8f090;
+    border: 1px solid rgba(80, 200, 50, 0.6);
+    box-shadow: 0 2px 12px rgba(40,200,40,.25);
+}
+.rel-delta-neg {
+    background: rgba(80, 15, 15, 0.82);
+    color: #f0a0a0;
+    border: 1px solid rgba(200, 60, 50, 0.6);
+    box-shadow: 0 2px 12px rgba(200,40,40,.25);
+}
+.rel-delta-fade {
+    opacity: 0;
+}
+@keyframes relDeltaRise {
+    from { transform: translateX(-50%) translateY(6px); opacity: 0; }
+    to   { transform: translateX(-50%) translateY(0px); opacity: 1; }
+}
+
+/* ── POV rel-delta floating labels ── */
+.pov-rel-delta {
+    position: absolute;
+    max-width: 220px;
+    padding: .25rem .6rem;
+    border-radius: 8px;
+    font-size: .78rem;
+    font-weight: 600;
+    white-space: normal;
+    text-align: center;
+    transform: translateX(-50%);
+    pointer-events: none;
+    animation: relDeltaRise .35s ease-out forwards;
+    transition: opacity .6s;
+    z-index: 60;
+}
+.pov-rel-delta-pos {
+    background: rgba(20, 80, 20, 0.88);
+    color: #c0f0a0;
+    border: 1px solid rgba(80,210,60,.55);
+    box-shadow: 0 2px 14px rgba(40,200,40,.3);
+}
+.pov-rel-delta-neg {
+    background: rgba(80, 15, 15, 0.88);
+    color: #f0a8a8;
+    border: 1px solid rgba(200,60,50,.55);
+    box-shadow: 0 2px 14px rgba(200,40,40,.3);
 }

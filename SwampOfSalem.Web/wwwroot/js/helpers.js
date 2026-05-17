@@ -37,7 +37,7 @@
 import {
     GATOR_SIZE, GATOR_COUNT, PERSONALITIES, ACTIVITY_TICKS, WALK_SPEED,
     SKIN_TONES, HAT_STYLES, SHIRT_COLORS, HOUSE_COLORS, NAMES,
-    PERSONALITY_EMOJI
+    PERSONALITY_EMOJI, HOUSE_RING_RADIUS
 } from './gameConfig.js';
 
 // ── Random helpers ────────────────────────────────────────────
@@ -302,7 +302,67 @@ export function applyTopicRelationDelta(a, b) {
 }
 
 /**
- * Builds a compact, human-readable sentence describing a gator's topic opinions.
+ * Same calculation as applyTopicRelationDelta but does NOT modify relations.
+ * Use this when you only need the delta/reasons for display purposes.
+ * @param {Object} a
+ * @param {Object} b
+ * @returns {{ delta: number, reasons: string[] }}
+ */
+export function calcTopicRelationDelta(a, b) {
+    const ao = a.topicOpinions ?? {};
+    const bo = b.topicOpinions ?? {};
+    let delta = 0;
+    const reasons = [];
+
+    if (ao.sports_team && bo.sports_team) {
+        const sc = _sportsTeamCompat(ao.sports_team, bo.sports_team);
+        const contribution = Math.round(sc * 0.15);
+        delta += contribution;
+        if (ao.sports_team === bo.sports_team) {
+            reasons.push(`Both support the ${ao.sports_team}! (+${contribution})`);
+        } else if (ao.sports_team === 'Chowda' || bo.sports_team === 'Chowda') {
+            const chowdaFan = ao.sports_team === 'Chowda' ? a.name : b.name;
+            reasons.push(`${chowdaFan} is a Chowda fan — locals aren't impressed. (${contribution})`);
+        } else {
+            reasons.push(`${a.name} roots for ${ao.sports_team}, ${b.name} for ${bo.sports_team}. (${contribution})`);
+        }
+    }
+    if (ao.local_gossip !== undefined && bo.local_gossip !== undefined) {
+        const diff = Math.abs(ao.local_gossip - bo.local_gossip);
+        const contribution = Math.round((100 - diff) * 0.08);
+        delta += contribution;
+        if (Math.abs(contribution) >= 3) {
+            reasons.push(contribution >= 0
+                ? `Enjoyed swapping gossip together. (+${contribution})`
+                : `Disagreed about sharing gossip. (${contribution})`);
+        }
+    }
+    if (ao.swamp_leadership !== undefined && bo.swamp_leadership !== undefined) {
+        const sameSign = Math.sign(ao.swamp_leadership) === Math.sign(bo.swamp_leadership);
+        const strength = (Math.abs(ao.swamp_leadership) + Math.abs(bo.swamp_leadership)) / 2;
+        const contribution = Math.round((sameSign ? 1 : -1) * strength * 0.1);
+        delta += contribution;
+        if (Math.abs(contribution) >= 3) {
+            reasons.push(sameSign
+                ? `Agree on swamp leadership. (+${contribution})`
+                : `Disagree on swamp leadership. (${contribution})`);
+        }
+    }
+    if (ao.favorite_swamp_activity !== undefined && bo.favorite_swamp_activity !== undefined) {
+        const diff = Math.abs(ao.favorite_swamp_activity - bo.favorite_swamp_activity);
+        const contribution = Math.round((100 - diff) * 0.06);
+        delta += contribution;
+        if (Math.abs(contribution) >= 3) {
+            reasons.push(contribution >= 0
+                ? `Share a love of swamp activities. (+${contribution})`
+                : `Different tastes for swamp fun. (${contribution})`);
+        }
+    }
+
+    return { delta, reasons };
+}
+
+/**
  * Used as context injected into the AI system prompt so the LLM "knows" what
  * the alligator cares about before generating dialog.
  *
@@ -621,6 +681,20 @@ export function buildFigureSVG(p) {
               <circle cx="${cx+18}" cy="14" r="4.5" fill="none" stroke="${hc}" stroke-width="1.5" opacity=".9"/>
               <line x1="${cx+22}" y1="17" x2="${cx+24}" y2="20" stroke="${hc}" stroke-width="1" opacity=".8"/>`;
             break;
+        case 'cowboy':
+            // Wide-brimmed cowboy hat with hatband
+            accessorySVG = `
+              <!-- Brim — wide flat oval -->
+              <ellipse cx="${cx+14}" cy="9" rx="16" ry="3.5" fill="${hc}" stroke="rgba(0,0,0,.4)" stroke-width=".8"/>
+              <!-- Crown -->
+              <rect x="${cx+6}" y="1" width="16" height="9" rx="3" fill="${hc}" stroke="rgba(0,0,0,.35)" stroke-width=".8"/>
+              <!-- Hat dent (crease along top) -->
+              <path d="M${cx+8},1 Q${cx+14},-2 ${cx+20},1" fill="none" stroke="rgba(0,0,0,.25)" stroke-width="1"/>
+              <!-- Hatband -->
+              <rect x="${cx+6}" y="7" width="16" height="2.5" rx="1" fill="rgba(0,0,0,.45)"/>
+              <!-- Hat pin / star on band -->
+              <circle cx="${cx+14}" cy="8.2" r="1.4" fill="#f0c040" opacity=".9"/>`;
+            break;
         case 'crest':
         default:
             // Feathered crest
@@ -630,6 +704,22 @@ export function buildFigureSVG(p) {
               <path d="M${cx+16},8 Q${cx+18},2 ${cx+22},7" fill="${hc}" opacity=".75"/>`;
             break;
     }
+
+    // Cowboy boots — drawn at foot of each leg
+    const bootColor = '#7a4a18';
+    const bootsSVG = `
+      <!-- Front-left boot -->
+      <rect x="${cx-16}" y="42" width="7" height="5" rx="1.5" fill="${bootColor}" stroke="rgba(0,0,0,.3)" stroke-width=".6"/>
+      <rect x="${cx-18}" y="45" width="10" height="3" rx="1" fill="${bootColor}" stroke="rgba(0,0,0,.25)" stroke-width=".5"/>
+      <!-- Front-right boot -->
+      <rect x="${cx+9}" y="42" width="7" height="5" rx="1.5" fill="${bootColor}" stroke="rgba(0,0,0,.3)" stroke-width=".6"/>
+      <rect x="${cx+8}" y="45" width="10" height="3" rx="1" fill="${bootColor}" stroke="rgba(0,0,0,.25)" stroke-width=".5"/>
+      <!-- Back-left boot -->
+      <rect x="${cx-8}" y="41" width="5" height="4" rx="1" fill="${bootColor}" opacity=".8"/>
+      <rect x="${cx-9}" y="44" width="7" height="2.5" rx="1" fill="${bootColor}" opacity=".75"/>
+      <!-- Back-right boot -->
+      <rect x="${cx+3}" y="41" width="5" height="4" rx="1" fill="${bootColor}" opacity=".8"/>
+      <rect x="${cx+2}" y="44" width="7" height="2.5" rx="1" fill="${bootColor}" opacity=".75"/>`;
 
     return `<svg class="figure" width="60" height="${svgH}" viewBox="0 0 60 ${svgH}">
       ${ripples}
@@ -656,6 +746,8 @@ export function buildFigureSVG(p) {
       <line x1="${cx+8}" y1="34" x2="${cx+13}" y2="44" stroke="${bodyColor}" stroke-width="3.5" stroke-linecap="round"/>
       <line x1="${cx-3}" y1="34" x2="${cx-5}" y2="43" stroke="${bodyColor}" stroke-width="3" stroke-linecap="round"/>
       <line x1="${cx+3}" y1="34" x2="${cx+5}" y2="43" stroke="${bodyColor}" stroke-width="3" stroke-linecap="round"/>
+      <!-- Boots -->
+      ${bootsSVG}
       <!-- Teeth -->
       <line x1="${cx+22}" y1="24" x2="${cx+22}" y2="28" stroke="#f0f0d8" stroke-width="1.4" stroke-linecap="round"/>
       <line x1="${cx+25}" y1="24" x2="${cx+25}" y2="27.5" stroke="#f0f0d8" stroke-width="1.2" stroke-linecap="round"/>
@@ -782,54 +874,43 @@ export function culdesacLayout() {
     const cx = W * 0.5, cy = H * 0.5;
 
     // These constants must stay in sync with the padR used in buildCuldesacSVG().
-    const padR     = 62;           // Half the lilypad collision zone (matches SVG padR).
-    const margin   = padR + 40;    // Keep pads away from the stage border.
-    const minDist  = padR * 2.8;   // Minimum centre-to-centre gap between pads.
-    const centreR  = 110;          // Dead-zone radius around the stage centre (fish market).
+    const padR = 90;   // Half the lilypad collision zone — wide enough for 2 gators.
+
+    // Place houses evenly around a circle; radius is chosen so all houses fit on screen
+    // with at least padR margin from the stage edges.
+    const maxByWidth  = (Math.min(cx, cy) - padR - 20);
+    const ringRadius  = Math.max(170, Math.min(maxByWidth, HOUSE_RING_RADIUS));
+
+    // Distribute GATOR_COUNT houses across (GATOR_COUNT + 2) evenly-spaced slots.
+    // The last 2 consecutive slots (at the bottom of the ring) are left empty to
+    // form a dirt-road gap that gators can walk through freely.
+    const totalSlots  = GATOR_COUNT + 2;
+    const slotAngle   = (Math.PI * 2) / totalSlots;
 
     const housePositions = [];
-    let attempts = 0;
-
-    // ── Random-scatter placement loop ─────────────────────────
-    // Try up to 4,000 random positions; accept the first one that
-    // passes all three constraints (margin, centre-clear, min-distance).
-    while (housePositions.length < GATOR_COUNT && attempts < 4000) {
-        attempts++;
-        const x = margin + Math.random() * (W - margin * 2);
-        const y = margin + Math.random() * (H - margin * 2);
-        const dx = x - cx, dy = y - cy;
-        // Constraint 2: Must not be inside the centre dead zone.
-        if (Math.sqrt(dx*dx + dy*dy) < centreR) continue;
-        // Constraint 3: Must be far enough from every already-placed pad.
-        let ok = true;
-        for (const h of housePositions) {
-            const ddx = x - h.x, ddy = y - h.y;
-            if (Math.sqrt(ddx*ddx + ddy*ddy) < minDist) { ok = false; break; }
-        }
-        if (ok) {
-            // Calculate the "door" as the point on the pad rim facing inward.
-            const ang = Math.atan2(cy - y, cx - x);
-            housePositions.push({
-                x, y,
-                doorX: x + Math.cos(ang) * (padR - 6),
-                doorY: y + Math.sin(ang) * (padR - 6),
-                angle: ang  // Stored so buildCuldesacSVG can tilt decorations outward.
-            });
-        }
+    for (let i = 0; i < GATOR_COUNT; i++) {
+        // Start at the top (–π/2) and go clockwise; skip the last 2 slots.
+        const ang = -Math.PI / 2 + i * slotAngle;
+        const x   = cx + Math.cos(ang) * ringRadius;
+        const y   = cy + Math.sin(ang) * ringRadius;
+        // Door faces the centre of the ring — angle from house toward center.
+        const doorAng = Math.atan2(cy - y, cx - x);
+        housePositions.push({
+            x, y,
+            doorX: x + Math.cos(doorAng) * (padR - 6),
+            doorY: y + Math.sin(doorAng) * (padR - 6),
+            angle: doorAng   // Stored so buildCuldesacSVG can tilt decorations outward.
+        });
     }
 
-    // ── Fallback: grid-fill remaining slots ───────────────────
-    // This runs only if the stage is very small and the random placer
-    // exhausted its attempts without filling all GATOR_COUNT slots.
-    while (housePositions.length < GATOR_COUNT) {
-        const idx = housePositions.length;
-        const gx = margin + (idx % 4) * ((W - margin*2) / 3);
-        const gy = margin + Math.floor(idx / 4) * ((H - margin*2) / 2.5);
-        const ang = Math.atan2(cy - gy, cx - gx);
-        housePositions.push({ x: gx, y: gy, doorX: gx + Math.cos(ang)*(padR-6), doorY: gy + Math.sin(ang)*(padR-6), angle: ang });
-    }
+    // Angles of the 2 empty slots — the dirt-road gap at the bottom of the ring.
+    const roadStartAngle = -Math.PI / 2 + GATOR_COUNT * slotAngle;
+    const roadEndAngle   = roadStartAngle + 2 * slotAngle;
 
-    return { cx, cy, radius: 0, housePositions };
+    return {
+        cx, cy, radius: ringRadius, housePositions,
+        roadArc: { startAngle: roadStartAngle, endAngle: roadEndAngle, radius: ringRadius }
+    };
 }
 
 /**
@@ -955,8 +1036,60 @@ export function buildCuldesacSVG(layout) {
         </g>`;
     }).join('');
 
+    // ── Dirt road arc (empty 2-slot gap in the house ring) ────
+    let roadSVG = '';
+    if (layout.roadArc) {
+        const { startAngle, endAngle, radius: rr } = layout.roadArc;
+        const roadW = 72;   // Width of the road band (inner to outer edge, pixels).
+
+        // Build the arc path for both inner and outer edges of the road band.
+        const arcPath = (r, a1, a2) => {
+            const x1 = cx + Math.cos(a1) * r, y1 = cy + Math.sin(a1) * r;
+            const x2 = cx + Math.cos(a2) * r, y2 = cy + Math.sin(a2) * r;
+            return `${x1},${y1} A${r},${r} 0 0,1 ${x2},${y2}`;
+        };
+        const outerR = rr + roadW / 2;
+        const innerR = rr - roadW / 2;
+
+        // Donut-slice path: outer arc CW then inner arc CCW back.
+        const ox1 = cx + Math.cos(startAngle) * outerR, oy1 = cy + Math.sin(startAngle) * outerR;
+        const ox2 = cx + Math.cos(endAngle)   * outerR, oy2 = cy + Math.sin(endAngle)   * outerR;
+        const ix1 = cx + Math.cos(endAngle)   * innerR, iy1 = cy + Math.sin(endAngle)   * innerR;
+        const ix2 = cx + Math.cos(startAngle) * innerR, iy2 = cy + Math.sin(startAngle) * innerR;
+        const roadPath = `M${ox1},${oy1} A${outerR},${outerR} 0 0,1 ${ox2},${oy2} L${ix1},${iy1} A${innerR},${innerR} 0 0,0 ${ix2},${iy2} Z`;
+
+        // Gravel stipple — small circles scattered along the arc midline.
+        let stipple = '';
+        const steps = 18;
+        for (let s = 0; s <= steps; s++) {
+            const a = startAngle + (s / steps) * (endAngle - startAngle);
+            // Two staggered rows at slightly different radii.
+            for (const dr of [-14, 0, 14]) {
+                const sr2 = rr + dr;
+                const sx = cx + Math.cos(a) * sr2, sy = cy + Math.sin(a) * sr2;
+                const r2 = 1.4 + (((s * 7 + dr) % 5 + 5) % 5) * 0.5;
+                stipple += `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="${r2}" fill="rgba(100,75,40,.45)"/>`;
+            }
+        }
+
+        // Edge ruts — thin lines tracing the inner and outer road edges.
+        const edgePath = (r2, a1, a2) => {
+            const ex1 = cx + Math.cos(a1) * r2, ey1 = cy + Math.sin(a1) * r2;
+            const ex2 = cx + Math.cos(a2) * r2, ey2 = cy + Math.sin(a2) * r2;
+            return `<path d="M${ex1.toFixed(1)},${ey1.toFixed(1)} A${r2},${r2} 0 0,1 ${ex2.toFixed(1)},${ey2.toFixed(1)}" fill="none" stroke="rgba(60,40,15,.5)" stroke-width="1.5" stroke-dasharray="6,5"/>`;
+        };
+
+        roadSVG = `
+        <!-- Dirt road gap -->
+        <path d="${roadPath}" fill="#8B6914" opacity="0.72"/>
+        <path d="${roadPath}" fill="url(#dirtTexture)" opacity="0.55"/>
+        ${stipple}
+        ${edgePath(outerR - 2, startAngle, endAngle)}
+        ${edgePath(innerR + 2, startAngle, endAngle)}`;
+    }
+
     // ── Interactive lilypads (homes) ───────────────────────────
-    const padR = 62;
+    const padR = 90;
     let houseSVGs = '';
     for (let i = 0; i < layout.housePositions.length; i++) {
         const h  = layout.housePositions[i];
@@ -1007,12 +1140,18 @@ export function buildCuldesacSVG(layout) {
           <stop offset="0%"   stop-color="#1e5030" stop-opacity="0"/>
           <stop offset="100%" stop-color="#0d2a15" stop-opacity="0.45"/>
         </radialGradient>
+        <pattern id="dirtTexture" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(30)">
+          <rect width="8" height="8" fill="#7a5510"/>
+          <line x1="0" y1="0" x2="8" y2="8" stroke="rgba(50,30,5,.35)" stroke-width="1"/>
+          <line x1="0" y1="4" x2="4" y2="8" stroke="rgba(50,30,5,.25)" stroke-width=".7"/>
+        </pattern>
       </defs>
       <rect width="${W}" height="${H}" fill="url(#swampDepth)"/>
       ${murkPatches}
       ${reeds}
       ${logs}
       ${miniPads}
+      ${roadSVG}
       ${houseSVGs}
     </svg>`;
 }

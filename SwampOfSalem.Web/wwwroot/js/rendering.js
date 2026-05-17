@@ -131,7 +131,7 @@ export function showDeadBody(gatorId) {
 }
 
 // ── Private-chat enclosure management ────────────────────────
-const PAD_R = 62; // lilypad collision radius — matches helpers.js
+const PAD_R = 90; // lilypad collision radius — matches helpers.js
 
 function _updateEnclosure(p) {
     const isPrivate = p.indoors && (p.activity === 'hosting' || p.activity === 'visiting');
@@ -497,4 +497,38 @@ function _renderPanel(p) {
         `<div class="panel-relations">${relRows}</div>` +
         (chatSection ? `<div class="panel-divider"></div>${chatSection}` : '') +
         (historySection ? `<div class="panel-divider"></div>${historySection}` : '');
+}
+
+// ── 2D relationship-delta floating labels ──────────────────────────────────
+const _relDelta2dTimers = new Map();
+
+/**
+ * Show a short-lived floating label above a gator in the 2D world view.
+ * Only renders when state.showRelDelta is true.
+ * @param {Object} gator  - The gator to float the label above.
+ * @param {string} text   - Reason text, e.g. "Both support the Rockets! (+8)"
+ * @param {number} delta  - Numeric delta (positive = green, negative = red)
+ */
+export function showRelDeltaLabel2D(gator, text, delta) {
+    if (!state.showRelDelta) return;
+    const layer = document.getElementById('rel-delta-layer');
+    if (!layer) return;
+
+    // Clear any existing label for this gator
+    const existing = _relDelta2dTimers.get(gator.id);
+    if (existing) { existing.el.remove(); clearTimeout(existing.timer); _relDelta2dTimers.delete(gator.id); }
+
+    const div = document.createElement('div');
+    div.className = 'rel-delta-label ' + (delta >= 0 ? 'rel-delta-pos' : 'rel-delta-neg');
+    div.textContent = text;
+    div.style.left = `${gator.x + GATOR_SIZE / 2}px`;
+    div.style.top  = `${gator.y - 55}px`;
+    layer.appendChild(div);
+
+    // Animate upward then fade out after 3 s
+    const timer = setTimeout(() => {
+        div.classList.add('rel-delta-fade');
+        setTimeout(() => { div.remove(); _relDelta2dTimers.delete(gator.id); }, 600);
+    }, 2400);
+    _relDelta2dTimers.set(gator.id, { el: div, timer });
 }

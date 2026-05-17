@@ -43,6 +43,7 @@ export const state = {
     rafId:        null,  // Handle returned by requestAnimationFrame(gameLoop). Cleared on game-over.
     paused:       false, // true = tick loop and rAF logic skip all work.
     nextId:       0,     // Monotonically increasing counter used by createGator() to assign gator IDs.
+    showRelDelta: false, // true = show relationship-change labels above speakers during conversations.
 
     // ── Visual maps ───────────────────────────────────────────────────────
     // These Map objects hold references to DOM elements created per-gator.

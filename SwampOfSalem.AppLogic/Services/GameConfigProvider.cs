@@ -79,6 +79,10 @@ public static class GameConfigProvider
             ["LIAR_CHANCE"] = RelationshipConstants.LiarChance,
             ["COMPAT"] = RelationshipConstants.Compat,
 
+            // Movement bounds
+            ["TOWN_RADIUS_GUARD"]  = GameConstants.TownRadiusGuard,
+            ["HOUSE_RING_RADIUS"]  = GameConstants.HouseRingRadius,
+
             // Bite / fight-or-flight tuning
             ["BITE_DEATH_THRESHOLD"]              = GameConstants.BiteDeathThreshold,
             ["BITE_FLEE_MIN_MS"]                  = GameConstants.BiteFleeMinMs,
