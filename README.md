@@ -49,14 +49,16 @@
 | 7 | [📊 Data Flow Diagrams](#-data-flow-diagrams) | How data moves at runtime |
 | 8 | [🎭 Personality System](#-personality-system) | The six archetypes explained |
 | 9 | [💘 Relationship & Suspicion System](#-relationship--suspicion-system) | How bonds & distrust work |
-| 10 | [🧠 AI Prompt Architecture](#-ai-prompt-architecture) | What the LLM actually receives |
-| 11 | [🔄 Game Phase Cycle](#-game-phase-cycle) | Timers, triggers, state machine |
-| 12 | [🌐 JavaScript Module Map](#-javascript-module-map) | All JS files and their roles |
-| 13 | [🚀 Setup & Running Locally](#-setup--running-locally) | Get it running in 5 minutes |
-| 14 | [⚙️ LLM Configuration](#%EF%B8%8F-llm-configuration) | Azure, OpenAI, local models |
-| 15 | [🎨 Key Design Patterns](#-key-design-patterns) | Patterns junior devs must know |
-| 16 | [🔧 Troubleshooting](#-troubleshooting) | Common issues & fixes |
-| 17 | [📚 Glossary](#-glossary) | Term definitions |
+| 10 | [🦷 Bite & Fight-or-Flight System](#-bite--fight-or-flight-system) | Biting, fear, and social fallout |
+| 11 | [🧠 AI Prompt Architecture](#-ai-prompt-architecture) | What the LLM actually receives |
+| 12 | [🔄 Game Phase Cycle](#-game-phase-cycle) | Timers, triggers, state machine |
+| 13 | [🌐 JavaScript Module Map](#-javascript-module-map) | All JS files and their roles |
+| 14 | [👁 POV Mode](#-pov-mode) | First-person 3D view & controls |
+| 15 | [🚀 Setup & Running Locally](#-setup--running-locally) | Get it running in 5 minutes |
+| 16 | [⚙️ LLM Configuration](#%EF%B8%8F-llm-configuration) | Azure, OpenAI, local models |
+| 17 | [🎨 Key Design Patterns](#-key-design-patterns) | Patterns junior devs must know |
+| 18 | [🔧 Troubleshooting](#-troubleshooting) | Common issues & fixes |
+| 19 | [📚 Glossary](#-glossary) | Term definitions |
 
 ---
 
@@ -74,6 +76,8 @@
 │  ✅  The murderer is an AI that actively lies and deflects          │
 │  ✅  All six personality archetypes give different speech styles    │
 │  ✅  Everything runs locally (LM Studio) or in the cloud           │
+│  ✅  Biting triggers fear, hatred, and social fallout in witnesses  │
+│  ✅  POV mode: see the swamp through any gator's eyes in 3D        │
 │                                                                     │
 │  ❌  No scripted dialogue                                           │
 │  ❌  No hard-coded plot events                                      │
@@ -98,6 +102,7 @@ You — the observer — can watch the entire simulation unfold, read each gator
 ║     Gators roam the swamp, approach each other, start conversations ║
 ║     AI generates dialogue, gossip, rumours, and topic debates       ║
 ║     Relationships grow or deteriorate. Suspicion builds.            ║
+║     Gators may BITE each other — triggering fear & social fallout  ║
 ║     Ends after 7 conversations + 1-minute countdown                 ║
 ║                         │                                            ║
 ║                         ▼                                            ║
@@ -730,6 +735,112 @@ Updated by:
 3. **Dawn reaction** — murder memories are injected into every agent's ChatHistory
 4. **Vote memory** — after execution, gators who liked the victim resent those who voted against them
 
+### Liar Mechanic
+
+~20% of non-murderer gators are assigned the **liar** flag at game start:
+
+- Their `perceivedRelations` shows the *opposite* of their `relations` (they appear friendly to gators they hate, and cold to gators they like).
+- When sharing opinions in conversation they have a `LIAR_FLIP_CHANCE` (default 40%) of reversing the opinion before passing it on — so their gossip actively misleads the group.
+- This creates red herrings: a town gator may appear suspicious of an innocent and trusting of the killer.
+
+---
+
+## 🦷 Bite & Fight-or-Flight System
+
+Biting is the main **daytime violence mechanic**. Any gator can bite another (via POV mode or simulation AI). A single bite creates a chain of social consequences that ripples through the entire group.
+
+### What happens when Gator A bites Gator B
+
+```
+╔═══════════════════════════════════════════════════════════════╗
+║  Gator A ──bite──► Gator B                                   ║
+╠═══════════════════════════════════════════════════════════════╣
+║                                                               ║
+║  IMMEDIATE EFFECTS ON GATOR B (victim)                       ║
+║  ─────────────────────────────────────────────────────────── ║
+║  • relation[A]     → -100  (maximum hatred, instantly)       ║
+║  • suspicion[A]    → +60   (B now strongly suspects A)       ║
+║  • biteCount       → +1    (tracked across entire session)   ║
+║  • At biteCount ≥ BITE_DEATH_THRESHOLD (default 5): B dies   ║
+║                                                               ║
+║  FIGHT-OR-FLIGHT (B, unless this is a counter-attack)        ║
+║  ─────────────────────────────────────────────────────────── ║
+║  • B's sprite flashes red for ~600ms                         ║
+║  • B flees to a random map edge for 4–7 seconds              ║
+║  • After flee window: 45% chance B counter-bites A back      ║
+║    (counter-bites do NOT trigger another fight-or-flight,    ║
+║     preventing infinite loops)                               ║
+║                                                               ║
+║  WITNESS EFFECTS (every living gator within TALK_DIST)       ║
+║  ─────────────────────────────────────────────────────────── ║
+║  • Witness fear[A] rises (they're now afraid of the biter)  ║
+║  • Witness logs a biteObservation for future gossip          ║
+║  • Reaction vocabulary depends on their existing feelings:   ║
+║                                                               ║
+║    How witness feels    │  Vocabulary type used              ║
+║    ─────────────────────┼──────────────────────────────────  ║
+║    Neutral              │  _vocabSawBite()                   ║
+║    Likes the victim     │  _vocabSawBiteOfLiked()            ║
+║    Hates the victim     │  _vocabSawBiteOfHated()            ║
+║    Likes A, hates B     │  _vocabLikedBitesHated()           ║
+║    Hates A, likes B     │  _vocabHatedBitesLiked()           ║
+╚═══════════════════════════════════════════════════════════════╝
+```
+
+### Fear Component
+
+Each gator tracks a `fear[otherId]` score (0–100) for every other gator:
+
+| Fear Level | Effect |
+|------------|--------|
+| **0–20** (Low) | No special behaviour |
+| **21–60** (Moderate) | Gator avoids the feared gator in activity selection |
+| **61–100** (High) | Gator will **seek allies** who share the same fear; coalition members nudge each other's vote toward the feared gator during Debate (`applyFearCoalitionNudges()`) |
+
+Fear rises from:
+- **Witnessing a bite** — direct +value to witness's `fear[biter]`
+- **Gossip about a bite** — `_maybeGossipAboutBite()` spreads second-hand fear through the group
+
+### Bite Death
+
+If a gator's `biteCount` reaches `BITE_DEATH_THRESHOLD` (default **5**, set in `GameConstants.cs`):
+
+1. `_killFromBites()` is called immediately.
+2. The gator is added to `state.deadIds` and removed from the simulation.
+3. Every living gator receives a memory entry: `"[Day N] <Name> was bitten to death by <killer>."` — this spikes suspicion of the biter across the entire group.
+
+### Gossip About Bites
+
+After conversations, `_maybeGossipAboutBite()` can fire if a gator has a recorded `biteObservation` memory:
+
+```
+Gator C witnessed A bite B earlier in the day
+     │
+     ▼
+During C's next conversation with Gator D:
+  C shares the story (15 possible phrase variants)
+  D's reaction depends on D's feelings toward A and B:
+     • D hates A → +suspicion for A; may vote against A
+     • D likes A → dismisses it or defends A
+     • D hates B → gloats / agrees with the attack
+     • D likes B → alarmed; fear of A rises
+     │
+     ▼
+If this shapes D's vote → the bite echoes through the election
+```
+
+### Configuring Bite Behaviour
+
+All numeric thresholds are set in `GameConstants.cs` and flow through `GameConfigProvider.cs` → `window.GameConfig` → `gameConfig.js`. Change them server-side — no JavaScript edits needed:
+
+| Constant | Default | What it controls |
+|----------|---------|-----------------|
+| `BITE_DEATH_THRESHOLD` | `5` | Bites before a gator dies |
+| `BITE_FLEE_MIN_MS` | `4000` | Minimum flee duration (ms) |
+| `BITE_FLEE_EXTRA_MS` | `3000` | Random extra flee time (ms) |
+| `BITE_COUNTER_CHANCE` | `0.45` | Probability victim counter-attacks |
+| `LIAR_FLIP_CHANCE` | `0.40` | Probability liar reverses an opinion |
+
 ---
 
 ## 🧠 AI Prompt Architecture
@@ -1110,6 +1221,77 @@ This makes the simulation robust against models that don't follow the JSON forma
 
 ---
 
+## 👁 POV Mode
+
+POV mode lets you step into the simulation and experience it from the **eye level of any living gator** using a real-time 3D view powered by **Babylon.js** (WebGPU with WebGL2 fallback).
+
+### Entering POV Mode
+
+1. Click any gator sprite on the 2D canvas to open the **Details Panel**.
+2. Click the **"👁 View POV"** button in the panel.
+3. The Babylon canvas slides in and you are now inside that gator's perspective.
+
+### Camera Controls
+
+| Input | Action |
+|-------|--------|
+| **Drag left / right** | Look left / right (pointer lock) |
+| **Drag up / down** | Look up / down |
+| **W / ↑** | Move forward |
+| **S / ↓** | Move backward |
+| **A / ←** | Strafe left |
+| **D / →** | Strafe right |
+| **Spacebar** | Jump (one-shot upward impulse, gravity brings you back down) |
+| **Escape** | Exit POV mode and release pointer lock |
+
+> 💡 After **4 seconds** of no input the camera automatically re-attaches to the active gator and follows them around the swamp.
+
+### POV Interaction Menu
+
+While in POV mode, **clicking another gator's 3D mesh** opens a small context menu:
+
+```
+╔══════════════════════════════╗
+║  🐊  Chomps                  ║
+║  ─────────────────────────── ║
+║  💬  Start Conversation      ║  ← Disabled if a conversation is already running
+║  🦷  Attack!                 ║  ← Bite this gator directly (5-second cooldown)
+║  🎯  Make Attack…            ║  ← Order another gator to attack (see below)
+║  👁  Switch POV              ║  ← Jump into Chomps' perspective
+╚══════════════════════════════╝
+```
+
+### 🦷 Attack!
+
+Bites the right-clicked gator directly as the current POV gator.  All [Bite & Fight-or-Flight](#-bite--fight-or-flight-system) consequences apply: relation drop, suspicion spike, witness reactions, fear updates.
+
+A **red full-screen flash** and **screen shake** play immediately, and a toast notification shows how many gators witnessed the attack.
+
+### 🎯 Make Attack…
+
+Lets you **orchestrate an attack between two other gators** — you pick who bites whom.
+
+```
+Step 1 — Choose the ATTACKER
+  (any living gator except the current POV gator — use 🦷 Attack! to bite yourself)
+         │
+         ▼
+Step 2 — Choose the VICTIM
+  (any living gator except the chosen attacker — can't attack self)
+         │
+         ▼
+applyBiteEffect(attacker, victim) fires with full social consequences
+Toast: "🎯 <Attacker> attacked <Victim>! N gators saw it."
+```
+
+The picker is dismissed by clicking outside it or pressing Cancel.
+
+### Exiting POV Mode
+
+- Press **Escape** or click the **✕ Exit POV** button to return to the 2D overhead view.
+
+---
+
 ## 🔧 Troubleshooting
 
 ### 🔴 Gators are standing still and not talking
@@ -1177,6 +1359,17 @@ This makes the simulation robust against models that don't follow the JSON forma
 | **Topic Compatibility** | A score computed at first meeting from shared opinions; seeds the initial relation |
 | **Hosting** | A gator inviting another inside their home for a private AI conversation |
 | **Overhearing** | When a bystander within TALK_DIST hears a public conversation |
+| **Bite** | A physical attack one gator performs on another; triggers fear, hate, and social fallout |
+| **biteCount** | Running total of times a gator has been bitten this session; at BITE_DEATH_THRESHOLD the gator dies |
+| **BITE_DEATH_THRESHOLD** | Number of bites that kills a gator (default 5; set in `GameConstants.cs`) |
+| **Fight-or-Flight** | The automatic response to being bitten: flee + possible counter-attack after the flee window |
+| **Counter-Attack** | A bitten gator's probabilistic retaliation bite (45% chance); skips another fight-or-flight to prevent loops |
+| **Fear** | Per-gator score (0–100) tracking how afraid one gator is of another; high fear triggers coalition voting |
+| **Fear Coalition** | Two or more gators afraid of the same target who nudge each other's vote toward that target |
+| **biteObservation** | A structured memory entry created when a gator witnesses a bite; used to seed gossip |
+| **POV Mode** | First-person 3D Babylon.js view from any living gator's eye level |
+| **Make Attack** | POV context-menu action that lets the player pick an attacker and victim to orchestrate a bite |
+| **LIAR_FLIP_CHANCE** | Probability (0–1) a liar reverses a shared opinion before passing it on (default 0.40) |
 
 ---
 
@@ -1216,12 +1409,14 @@ This makes the simulation robust against models that don't follow the JSON forma
 7. [Data Flow Diagrams](#-data-flow-diagrams)
 8. [Personality System](#-personality-system)
 9. [Relationship & Suspicion System](#-relationship--suspicion-system)
-10. [AI Prompt Architecture](#-ai-prompt-architecture)
-11. [Game Phase Cycle](#-game-phase-cycle)
-12. [Setup & Running Locally](#-setup--running-locally)
-13. [LLM Configuration](#-llm-configuration)
-14. [Key Design Patterns](#-key-design-patterns)
-15. [Glossary](#-glossary)
+10. [🦷 Bite & Fight-or-Flight System](#-bite--fight-or-flight-system)
+11. [AI Prompt Architecture](#-ai-prompt-architecture)
+12. [Game Phase Cycle](#-game-phase-cycle)
+13. [👁 POV Mode](#-pov-mode)
+14. [Setup & Running Locally](#-setup--running-locally)
+15. [LLM Configuration](#-llm-configuration)
+16. [Key Design Patterns](#-key-design-patterns)
+17. [Glossary](#-glossary)
 
 ---
 
@@ -1244,6 +1439,7 @@ You — the player — watch it all unfold in real time on the simulation canvas
 │                   ONE FULL GAME ROUND                    │
 │                                                          │
 │  ☀️ DAY        Gators roam, chat, gossip, form bonds    │
+│                 Gators may BITE each other               │
 │                 (~30 min real-time OR 7 conversations)   │
 │                                                          │
 │  🌙 NIGHT      Murderer secretly kills one gator        │
@@ -1750,6 +1946,60 @@ Once suspicion exceeds **55** (`CONVICTION_THRESHOLD`):
 - Flip their stated opinion vs their true feeling toward gators they distrust
 - Spread false rumours about alligators they dislike
 - Present friendly faces to enemies
+- Reverse shared opinions before passing them on (`LIAR_FLIP_CHANCE` = 40%)
+
+---
+
+## 🦷 Bite & Fight-or-Flight System
+
+Biting is the main **daytime violence mechanic**. Any gator can bite another (via POV mode or simulation AI). A single bite creates a chain of social consequences that ripples through the entire group.
+
+### What happens when Gator A bites Gator B
+
+```
+Gator A ──bite──► Gator B
+
+  IMMEDIATE EFFECTS ON GATOR B (victim)
+  • relation[A]     → -100  (maximum hatred, instantly)
+  • suspicion[A]    → +60   (B now strongly suspects A)
+  • biteCount       → +1    (tracked across entire session)
+  • At biteCount ≥ BITE_DEATH_THRESHOLD (default 5): B dies
+
+  FIGHT-OR-FLIGHT (B, unless this is a counter-attack)
+  • B's sprite flashes red for ~600ms
+  • B flees to a random map edge for 4–7 seconds
+  • After flee window: 45% chance B counter-bites A back
+    (counter-bites do NOT trigger another fight-or-flight)
+
+  WITNESS EFFECTS (every living gator within TALK_DIST)
+  • Witness fear[A] rises
+  • Witness logs a biteObservation for future gossip
+  • Reaction vocabulary depends on their existing feelings toward A and B
+```
+
+### Fear Component
+
+Each gator tracks a `fear[otherId]` score (0–100) for every other gator:
+
+| Fear Level | Effect |
+|------------|--------|
+| **0–20** (Low) | No special behaviour |
+| **21–60** (Moderate) | Gator avoids the feared gator in activity selection |
+| **61–100** (High) | Gator seeks allies; fear coalition members nudge each other's vote toward the feared gator |
+
+### Bite Death
+
+When `biteCount` reaches `BITE_DEATH_THRESHOLD` (default **5**): the gator is removed from the simulation and every living gator receives a memory entry naming the killer — spiking group-wide suspicion of the biter.
+
+### Configuring Bite Behaviour
+
+| Constant | Default | What it controls |
+|----------|---------|-----------------|
+| `BITE_DEATH_THRESHOLD` | `5` | Bites before a gator dies |
+| `BITE_FLEE_MIN_MS` | `4000` | Minimum flee duration (ms) |
+| `BITE_FLEE_EXTRA_MS` | `3000` | Random extra flee time (ms) |
+| `BITE_COUNTER_CHANCE` | `0.45` | Probability victim counter-attacks |
+| `LIAR_FLIP_CHANCE` | `0.40` | Probability liar reverses a shared opinion |
 
 ---
 
@@ -1827,6 +2077,46 @@ stateDiagram-v2
 | 🗣️ Debate | ~30 seconds | Accusations and defences |
 | 🗳️ Vote | Varies | Each voter gets an AI call; clockwise order |
 | ⚔️ Execute | ~5 seconds | Execution walk animation |
+
+---
+
+## 👁 POV Mode
+
+POV mode lets you step into the simulation and experience it from the **eye level of any living gator** using a real-time 3D view powered by **Babylon.js** (WebGPU with WebGL2 fallback).
+
+### Entering POV Mode
+
+1. Click any gator sprite on the 2D canvas to open the **Details Panel**.
+2. Click the **"👁 View POV"** button in the panel.
+3. The Babylon canvas slides in and you are now inside that gator's perspective.
+
+### Camera Controls
+
+| Input | Action |
+|-------|--------|
+| **Drag left / right** | Look left / right (pointer lock) |
+| **Drag up / down** | Look up / down |
+| **W / ↑** | Move forward |
+| **S / ↓** | Move backward |
+| **A / ←** | Strafe left |
+| **D / →** | Strafe right |
+| **Spacebar** | Jump |
+| **Escape** | Exit POV mode |
+
+### POV Interaction Menu
+
+Right-clicking another gator's 3D mesh opens a context menu:
+
+| Action | What it does |
+|--------|-------------|
+| 💬 Start Conversation | Trigger an AI conversation with that gator |
+| 🦷 Attack! | Bite this gator directly (all bite consequences apply) |
+| 🎯 Make Attack… | Pick any attacker + victim pair to orchestrate a bite |
+| 👁 Switch POV | Jump into that gator's perspective |
+
+### 🎯 Make Attack…
+
+A two-step picker appears: choose the **attacker**, then choose the **victim**. `applyBiteEffect(attacker, victim)` fires with full social consequences. A toast shows how many witnesses saw it.
 
 ---
 
@@ -1957,6 +2247,17 @@ Every LLM response is treated as untrusted input. The parsing code:
 | **Social Need** | A 0-100 meter that decays over time; when urgent a gator actively seeks conversation |
 | **HomeIndex** | A gator's house position (0-5); also determines clockwise vote order |
 | **Minimal API** | ASP.NET Core pattern: all endpoints defined as lambdas, no controllers |
+| **Bite** | A physical attack one gator performs on another; triggers fear, hate, and social fallout |
+| **biteCount** | Running total of times a gator has been bitten; at BITE_DEATH_THRESHOLD the gator dies |
+| **BITE_DEATH_THRESHOLD** | Number of bites that kills a gator (default 5; set in `GameConstants.cs`) |
+| **Fight-or-Flight** | The automatic response to being bitten: flee + possible counter-attack |
+| **Counter-Attack** | A bitten gator's probabilistic retaliation bite (45% chance); skips another fight-or-flight |
+| **Fear** | Per-gator score (0–100) tracking how afraid one gator is of another |
+| **Fear Coalition** | Two or more gators afraid of the same target who nudge each other's vote toward that target |
+| **biteObservation** | A memory entry created when a gator witnesses a bite; seeds gossip |
+| **POV Mode** | First-person 3D Babylon.js view from any living gator's eye level |
+| **Make Attack** | POV context-menu action to pick an attacker and victim and orchestrate a bite |
+| **LIAR_FLIP_CHANCE** | Probability (0–1) a liar reverses a shared opinion before passing it on (default 0.40) |
 
 ---
 

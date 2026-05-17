@@ -12,13 +12,13 @@ Program.cs
   4. AddSingleton<GatorAgentService>()    → AI engine
   5. AddSingleton<GatorBrainService>()    → rule-based engine
   6. AddSingleton<DialogRouter>()         → routes to AI or rules based on Mode
-  7. UseDefaultFiles() + UseStaticFiles() → serve wwwroot/
+  7. UseDefaultFiles() + UseStaticFiles() → serve wwwroot/a
   8. Map all 14 endpoints
   9. app.Run()
 ```
 
 ## API endpoints
-
+a
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/agent/initialize` | Spawn all gators and initialise agents |

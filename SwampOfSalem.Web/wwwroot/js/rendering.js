@@ -317,6 +317,15 @@ export function initTooltip() {
         e.stopPropagation();
         closePanel();
     });
+
+    // POV button — dispatches a custom event caught by index.html
+    panelContent.addEventListener('click', e => {
+        const btn = e.target.closest('.panel-pov-btn');
+        if (!btn) return;
+        e.stopPropagation();
+        const gatorId = Number(btn.dataset.gatorId);
+        document.dispatchEvent(new CustomEvent('gator-pov-request', { detail: { gatorId } }));
+    });
 }
 
 function closePanel() {
@@ -474,6 +483,7 @@ function _renderPanel(p) {
 
     panelContent.innerHTML =
         `<div class="panel-name">${p.name}${isMurderer ? ' <span class="panel-murderer">\uD83D\uDD2A Murderer</span>' : ''}${p.liar && !isMurderer ? ' <span class="panel-liar">\uD83C\uDFA0 Liar</span>' : ''}</div>` +
+        `<button class="panel-pov-btn" data-gator-id="${p.id}">👁 View POV</button>` +
         `<div class="panel-meta">${PERSONALITY_EMOJI[p.personality]} ${p.personality[0].toUpperCase() + p.personality.slice(1)}</div>` +
         `<div class="panel-meta">${ACTIVITY_EMOJI[p.activity] ?? '\uD83D\uDDE3\uFE0F'} ${actDesc}</div>` +
         `<div class="panel-meta">Mood ${MOOD_EMOJI(mood)}</div>` +
